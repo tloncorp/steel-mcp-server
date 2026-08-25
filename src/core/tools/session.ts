@@ -692,6 +692,35 @@ export function registerSessionDiagnostics(host: ToolHost, deps: ServerDeps): vo
             guard(deps, 'browser_session_diagnostics', ctx.mcpReq, async () => {
                 if (args.list_live) return liveSessionResult(deps, await deps.registry.list(deps.principal));
                 const target = await resolveDiagnosticsTarget(deps, args, ctx.mcpReq.signal);
+                if (deps.config.deployment === 'self_hosted') {
+                    const session = await deps.api
+                        .getSession(target.steelSessionId, ctx.mcpReq.signal)
+                        .catch(() => undefined);
+                    const notes = [
+                        ...(target.selectionNote ? [target.selectionNote] : []),
+                        'This cluster browser backend does not expose the cloud agent-trace or account-log endpoints. Session metadata is shown instead.',
+                    ];
+                    if (session?.status) notes.push(`Session status: ${session.status}.`);
+                    if (session?.createdAt) notes.push(`Created: ${session.createdAt}.`);
+                    if (session?.duration !== undefined) notes.push(`Duration: ${session.duration} ms.`);
+                    return successResult(
+                        {
+                            result: 'Session metadata is available; detailed action history is not recorded by this browser backend.',
+                            notes,
+                        },
+                        {
+                            ...(target.kind === 'live_handle'
+                                ? { session_id: target.reference }
+                                : { finished_session_id: target.steelSessionId }),
+                            status: session?.status,
+                            created_at: session?.createdAt,
+                            duration_ms: session?.duration,
+                            event_count: 0,
+                            has_more: false,
+                            diagnostics: 'metadata_only',
+                        }
+                    );
+                }
                 const [timelineRead, logsRead] = await Promise.allSettled([
                     deps.api.getAgentTraces(target.steelSessionId, ctx.mcpReq.signal),
                     deps.api.getSessionLogs(target.steelSessionId, ctx.mcpReq.signal),

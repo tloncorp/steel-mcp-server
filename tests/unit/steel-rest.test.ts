@@ -106,12 +106,38 @@ describe('SteelRestClient artifact endpoints', () => {
     it('returns the hosted URL for a screenshot rather than bytes', async () => {
         const { api } = client([{ body: { url: 'https://files.steel.dev/v1/static/abc.png' } }]);
         const result = await api.screenshot({ url: 'https://example.com', fullPage: true });
-        expect(result.url).toBe('https://files.steel.dev/v1/static/abc.png');
+        expect(result).toEqual({ kind: 'hosted', url: 'https://files.steel.dev/v1/static/abc.png' });
     });
 
     it('returns the hosted URL for a PDF rather than bytes', async () => {
         const { api } = client([{ body: { url: 'https://files.steel.dev/v1/static/abc.pdf' } }]);
-        expect((await api.pdf({ url: 'https://example.com' })).url).toMatch(/\.pdf$/);
+        expect(await api.pdf({ url: 'https://example.com' })).toEqual({
+            kind: 'hosted',
+            url: 'https://files.steel.dev/v1/static/abc.pdf',
+        });
+    });
+
+    it('accepts raw screenshot and PDF bytes from the cluster browser', async () => {
+        const { api } = client(
+            [
+                { rawBody: 'JFIF-image', headers: { 'content-type': 'image/jpeg' } },
+                { rawBody: '%PDF-1.4', headers: { 'content-type': 'application/pdf' } },
+            ],
+            { STEEL_BASE_URL: 'http://browser:3000' }
+        );
+
+        expect(await api.screenshot({ url: 'https://example.com' })).toEqual({
+            kind: 'inline',
+            data: Buffer.from('JFIF-image').toString('base64'),
+            mimeType: 'image/jpeg',
+            size: Buffer.byteLength('JFIF-image'),
+        });
+        expect(await api.pdf({ url: 'https://example.com' })).toEqual({
+            kind: 'inline',
+            data: Buffer.from('%PDF-1.4').toString('base64'),
+            mimeType: 'application/pdf',
+            size: Buffer.byteLength('%PDF-1.4'),
+        });
     });
 });
 

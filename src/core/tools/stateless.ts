@@ -3,7 +3,7 @@
 import type { ContentBlock } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { ServerDeps, ToolHost } from '../context.js';
-import { botDetectionError, detectBotBlock } from '../errors.js';
+import { botDetectionError, detectBotBlock, SteelToolError } from '../errors.js';
 import type { ScrapeFormat } from '../steel/types.js';
 import { type Provenance, stripHtmlComments, stripInvisible } from '../untrusted.js';
 import { cursorSchema, fencedSection, guard, maxTokensSchema, successResult, withPage } from './shared.js';
@@ -306,6 +306,34 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                     ctx.mcpReq.signal
                 );
                 const inline = args.inline ?? true;
+                if (artifact.kind === 'inline') {
+                    if (artifact.mimeType !== 'image/png' && artifact.mimeType !== 'image/jpeg') {
+                        throw new SteelToolError(
+                            `Self-hosted browser returned an unsupported screenshot type: ${artifact.mimeType}`,
+                            { code: 'steel_error' }
+                        );
+                    }
+                    return successResult(
+                        {
+                            result: `Captured ${url}. The screenshot is attached inline.`,
+                            notes:
+                                inline === false
+                                    ? [
+                                          'This self-hosted browser returns screenshot bytes rather than a hosted link, so the image is attached inline.',
+                                      ]
+                                    : undefined,
+                        },
+                        { source_url: url, mime_type: artifact.mimeType, size: artifact.size },
+                        [
+                            {
+                                type: 'image',
+                                data: artifact.data,
+                                mimeType: artifact.mimeType,
+                                annotations: { audience: ['user'] },
+                            },
+                        ]
+                    );
+                }
                 const downloaded = inline ? await downloadArtifact(deps, artifact.url, ctx.mcpReq.signal) : undefined;
                 const content: ContentBlock[] = [];
                 if (downloaded?.state === 'embedded') {
@@ -370,6 +398,30 @@ export function registerPdf(host: ToolHost, deps: ServerDeps): void {
                     { url: args.url, delay: args.delay_ms, useProxy: args.use_proxy },
                     ctx.mcpReq.signal
                 );
+                if (artifact.kind === 'inline') {
+                    if (artifact.mimeType !== 'application/pdf') {
+                        throw new SteelToolError(
+                            `Self-hosted browser returned an unsupported PDF type: ${artifact.mimeType}`,
+                            { code: 'steel_error' }
+                        );
+                    }
+                    const content: ContentBlock[] = [
+                        {
+                            type: 'resource',
+                            resource: {
+                                uri: 'browser-artifact:///page.pdf',
+                                blob: artifact.data,
+                                mimeType: artifact.mimeType,
+                            },
+                            annotations: { audience: ['user'] },
+                        },
+                    ];
+                    return successResult(
+                        { result: `Rendered ${args.url} to PDF. The PDF is attached.` },
+                        { source_url: args.url, mime_type: artifact.mimeType, size: artifact.size },
+                        content
+                    );
+                }
                 const content: ContentBlock[] = [
                     {
                         type: 'resource_link',

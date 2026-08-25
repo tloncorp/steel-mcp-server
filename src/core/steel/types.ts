@@ -46,10 +46,10 @@ export interface ArtifactRequest {
     useProxy?: boolean | undefined;
 }
 
-/** Both `/v1/screenshot` and `/v1/pdf` answer with a hosted file URL, never with bytes. */
-export interface ArtifactResponse {
-    url: string;
-}
+/** Steel Cloud hosts artifacts; the self-hosted browser answers with the bytes directly. */
+export type ArtifactResponse =
+    | { kind: 'hosted'; url: string }
+    | { kind: 'inline'; data: string; mimeType: string; size: number };
 
 export interface CreateSessionRequest {
     /** Minted by this server before the call, so a crash mid-create still leaves a sweepable id. */

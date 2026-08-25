@@ -74,8 +74,9 @@ cloud('Steel Cloud contract', () => {
     it('answers a screenshot request with a hosted file URL, not bytes', async () => {
         const response = await api.screenshot({ url: TARGET });
 
-        // RESEARCH.md §2.2: /v1/screenshot returns { url }. Treating it as bytes is the mistake.
-        expect(typeof response.url).toBe('string');
+        // Steel Cloud returns a hosted URL; self-hosted Steel returns the bytes directly.
+        expect(response.kind).toBe('hosted');
+        if (response.kind !== 'hosted') throw new Error('Steel Cloud returned screenshot bytes');
         expect(response.url).toMatch(/^https?:\/\//);
 
         const head = await fetch(response.url, { method: 'HEAD' });

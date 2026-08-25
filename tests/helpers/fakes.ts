@@ -89,12 +89,12 @@ export class FakeSteelApi implements SteelApi {
 
     async screenshot(request: ArtifactRequest): Promise<ArtifactResponse> {
         this.artifacts.push(request);
-        return { url: 'https://files.steel.dev/v1/static/shot.png' };
+        return { kind: 'hosted', url: 'https://files.steel.dev/v1/static/shot.png' };
     }
 
     async pdf(request: ArtifactRequest): Promise<ArtifactResponse> {
         this.artifacts.push(request);
-        return { url: 'https://files.steel.dev/v1/static/doc.pdf' };
+        return { kind: 'hosted', url: 'https://files.steel.dev/v1/static/doc.pdf' };
     }
 
     async createSession(request: CreateSessionRequest): Promise<SteelSession> {

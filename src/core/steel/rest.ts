@@ -80,7 +80,7 @@ interface RequestSpec {
     operation: SteelOperation;
     signal?: AbortSignal | undefined;
     /** Defaults to JSON so existing endpoint decoding remains unchanged. */
-    responseType?: 'json' | 'text' | undefined;
+    responseType?: 'json' | 'text' | 'artifact' | undefined;
     /** Defaults to application/json; text endpoints can request their native media type. */
     accept?: string | undefined;
     /** Statuses answered with `undefined` instead of an error, for idempotent operations. */
@@ -168,6 +168,26 @@ export class SteelRestClient implements SteelApi {
 
         if (response.status === 204) return undefined;
         if (spec.responseType === 'text') return (await response.text()) as T;
+        if (spec.responseType === 'artifact') {
+            const mimeType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+            if (mimeType === 'application/json' || mimeType?.endsWith('+json')) {
+                const artifact = (await response.json()) as { url?: unknown };
+                if (typeof artifact.url !== 'string' || !artifact.url) {
+                    throw new SteelToolError(`Steel returned an invalid artifact response for ${spec.path}.`, {
+                        code: 'steel_error',
+                    });
+                }
+                return { kind: 'hosted', url: artifact.url } as T;
+            }
+
+            const bytes = Buffer.from(await response.arrayBuffer());
+            return {
+                kind: 'inline',
+                data: bytes.toString('base64'),
+                mimeType: mimeType || 'application/octet-stream',
+                size: bytes.byteLength,
+            } as T;
+        }
         return (await response.json()) as T;
     }
 
@@ -205,11 +225,13 @@ export class SteelRestClient implements SteelApi {
     }
 
     async screenshot(request: ArtifactRequest, signal?: AbortSignal): Promise<ArtifactResponse> {
-        return this.requireJson<ArtifactResponse>({
+        const result = await this.request<ArtifactResponse>({
             method: 'POST',
             path: '/screenshot',
             operation: 'browser_tool',
             signal,
+            responseType: 'artifact',
+            accept: 'application/json, image/png, image/jpeg',
             body: {
                 url: request.url,
                 fullPage: request.fullPage,
@@ -217,16 +239,22 @@ export class SteelRestClient implements SteelApi {
                 useProxy: request.useProxy,
             },
         });
+        if (!result) throw new SteelToolError('Steel returned an empty body for /screenshot.', { code: 'steel_error' });
+        return result;
     }
 
     async pdf(request: ArtifactRequest, signal?: AbortSignal): Promise<ArtifactResponse> {
-        return this.requireJson<ArtifactResponse>({
+        const result = await this.request<ArtifactResponse>({
             method: 'POST',
             path: '/pdf',
             operation: 'browser_tool',
             signal,
+            responseType: 'artifact',
+            accept: 'application/json, application/pdf',
             body: { url: request.url, delay: request.delay, useProxy: request.useProxy },
         });
+        if (!result) throw new SteelToolError('Steel returned an empty body for /pdf.', { code: 'steel_error' });
+        return result;
     }
 
     async createSession(request: CreateSessionRequest, signal?: AbortSignal): Promise<SteelSession> {
