@@ -30,7 +30,7 @@ describe('session plan state', () => {
         expect(
             recommendSession({ origin: 'https://example.com', goal: 'read', needs: [], configuredTimeoutMs: 900_000 })
                 .recommendedTool
-        ).toBe('steel_scrape');
+        ).toBe('browser_scrape');
         const planned = recommendSession({
             origin: 'https://example.com',
             goal: 'account',

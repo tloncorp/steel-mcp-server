@@ -16,7 +16,7 @@ propagation (`steel-mcp/tracing`), and the MRTR human-in-the-loop handoff.
 P4.5 landed ahead of P3 and past its original scope: MCP Apps now show a controllable live CDP
 screencast with exclusive renewable human-control leases, release fencing, and a trusted local-file
 picker whose bytes stay off the MCP/model plane, plus a safe dashboard link for a finished headed
-session. `steel_session_handoff` invokes the same MRTR path for any manual step; login walls and
+session. `browser_session_handoff` invokes the same MRTR path for any manual step; login walls and
 CAPTCHAs still invoke it automatically (§14.A).
 
 P3 now has its entrypoint: `src/hosted.ts` (`npm run start:hosted`) builds the runtime, picks the
@@ -65,7 +65,7 @@ count (§5), a soak test, staging, and `mcp.steel.dev` itself.
    ▼
  mcp.steel.dev — stateless Node replicas, round-robin, no sticky routing
    ├─ Auth: key -> project within org, plan limits from GET /v1/details
-   ├─ Handle registry (Redis): session_id -> {steel_session_id, org, project, timestamps}
+   ├─ Handle registry (Redis): session_id -> {finished_session_id, org, project, timestamps}
    ├─ Tool layer (transport-agnostic core)
    │    ├─ stateless reads ──► POST /v1/scrape | /v1/screenshot | /v1/pdf
    │    ├─ structured browse ──► CDP  wss://connect.steel.dev?apiKey=<key>&sessionId=<id>
@@ -99,7 +99,7 @@ src/
 
 ## 5. State model — explicit handles
 
-There is no protocol session to hang state on. `steel_session_create` mints a handle; every stateful tool takes `session_id` as an ordinary argument. This is the spec's prescribed replacement, and its worked example is literally an open browser context.
+There is no protocol session to hang state on. `browser_session_create` mints a handle; every stateful tool takes `session_id` as an ordinary argument. This is the spec's prescribed replacement, and its worked example is literally an open browser context.
 
 Consequences, all good: no Redis event store, no sticky routing, no `Mcp-Session-Id`, replicas fully interchangeable, and **multiple concurrent browsers per client** become possible (capped by plan concurrency, not by structure). It is also the only model that works on ChatGPT and claude.ai, which already close the MCP session between consecutive tool calls.
 
@@ -114,7 +114,7 @@ Five layers. The strongest is not ours:
 | 1 | **Steel `inactivityTimeout`** (~120s) set on every create | our process dying, replica rescheduling, network partition, client vanishing. **This is the guarantee** |
 | 2 | **Steel `timeout`** hard cap. Requested as 15 minutes by default and clamped only when `GET /v1/details` reports a maximum. When it does not, Steel validates the requested value; the configured default is not misreported as a plan ceiling | same |
 | 3 | **Client-minted `sessionId` UUID** passed on create | the create-then-crash gap: we know the id before create returns |
-| 4 | **`steel_session_release`** tool, idempotent, retention policy stated in `steel_session_create`'s description so the model can see the cost | fast path |
+| 4 | **`browser_session_release`** tool, idempotent, retention policy stated in `browser_session_create`'s description so the model can see the cost | fast path |
 | 5 | **Abort on stream close** — plumb the request abort signal into every CDP call | closing the SSE stream *is* cancellation now; `notifications/cancelled` survives only on stdio. A client hang-up mid-navigate otherwise burns minutes with nobody listening |
 | 6 | **Our reaper** over the handle registry | reclaims concurrency slots faster than Steel's timeout would |
 
@@ -136,7 +136,7 @@ The query param is not optional politeness — Browserbase, Bright Data and Brow
 
 ## 7. Tool surface
 
-**Position: low-level primitives plus batching.** Not natural-language actions. The only measured evidence for the high-level architecture attributes its win to round-trip elimination, which `steel_batch` captures without putting an LLM in the product — and without the inference cost, nondeterminism, and hidden failure modes.
+**Position: low-level primitives plus batching.** Not natural-language actions. The only measured evidence for the high-level architecture attributes its win to round-trip elimination, which `browser_batch` captures without putting an LLM in the product — and without the inference cost, nondeterminism, and hidden failure modes.
 
 **Position: ship a vision surface, opt-in, never default.** Computer use is a native interleavable tool in 2026 frontier models, so a host can hold both surfaces at once and we don't have to choose. Back it with Steel's `POST /v1/sessions/{id}/computer`, downscale server-side at 1280×720, include `zoom(region)`. No coordinate grids or tiled images — measured no consistent uplift.
 
@@ -146,20 +146,20 @@ All tools `openWorldHint: true`, all carry `title` and `readOnlyHint`/`destructi
 
 | Tool | Returns | Why it earns its slot |
 |---|---|---|
-| `steel_scrape` | fenced content + always-present `links[]` + `metadata`, cursor-paginated | **Primary read.** No session, no billing, no leak risk. Param is `format` (array-valued, singular name); values `html`\|`readability`\|`cleaned_html`\|`markdown` |
-| `steel_screenshot` | **4 MiB-bounded MCP image block** when possible, always with an attachment resource link | "Screenshot causes context overflow by default" is a real filed issue against Playwright MCP. Don't repeat it |
-| `steel_pdf` | resource link | `/v1/screenshot` and `/v1/pdf` return `{url}`, not bytes |
-| `steel_session_create` | `{session_id, viewer_url, expires_at, plan_limits}` | **Explicit, not lazy** — the model must see that a billed resource started, name it, and release it |
-| `steel_session_release` | confirmation + captured session context | Captures context *before* release so the ordering trap can't bite |
-| `steel_navigate` | final URL, title, status, `navigated`, `dom_changed` | `include_snapshot` **false** by default |
-| `steel_snapshot` | a11y tree with `@eN` refs + `snapshot_id` | The core structured read. Budget knobs mandatory |
-| `steel_find` | matching nodes + refs + context | **Highest-ROI tool in the category.** Most turns need one element, not the page |
-| `steel_act` | outcome + change signal | One action enum (`click`\|`type`\|`fill_form`\|`select`\|`hover`\|`scroll`\|`press`\|`go_back`\|`dismiss_overlays`). `target` accepts a ref **or** a selector — agents guess selectors constantly |
-| `steel_wait_for` | outcome | Explicit waits only. **No `networkidle`** |
-| `steel_session_diagnostics` | timeline from `/agent-traces` + `/logs` | **P1, not polish.** Nobody else can build this |
-| `steel_session_replay` | safe Steel dashboard link | Explicit watch/replay request only; finished session by Steel UUID, or latest released; never starts a browser |
-| `steel_batch` | one snapshot at the end, stops at first failure | Where the round-trip win lives |
-| `steel_session_live_view` | scoped CDP connection details, no page content | Shipped with §14.A. `_meta.ui.visibility: ['app']`, so a supporting host keeps it out of the model's list; last in the tool table so every other tool's bytes stay identical |
+| `browser_scrape` | fenced content + always-present `links[]` + `metadata`, cursor-paginated | **Primary read.** No session, no billing, no leak risk. Param is `format` (array-valued, singular name); values `html`\|`readability`\|`cleaned_html`\|`markdown` |
+| `browser_screenshot` | **4 MiB-bounded MCP image block** when possible, always with an attachment resource link | "Screenshot causes context overflow by default" is a real filed issue against Playwright MCP. Don't repeat it |
+| `browser_pdf` | resource link | `/v1/screenshot` and `/v1/pdf` return `{url}`, not bytes |
+| `browser_session_create` | `{session_id, viewer_url, expires_at, plan_limits}` | **Explicit, not lazy** — the model must see that a billed resource started, name it, and release it |
+| `browser_session_release` | confirmation + captured session context | Captures context *before* release so the ordering trap can't bite |
+| `browser_navigate` | final URL, title, status, `navigated`, `dom_changed` | `include_snapshot` **false** by default |
+| `browser_snapshot` | a11y tree with `@eN` refs + `snapshot_id` | The core structured read. Budget knobs mandatory |
+| `browser_find` | matching nodes + refs + context | **Highest-ROI tool in the category.** Most turns need one element, not the page |
+| `browser_act` | outcome + change signal | One action enum (`click`\|`type`\|`fill_form`\|`select`\|`hover`\|`scroll`\|`press`\|`go_back`\|`dismiss_overlays`). `target` accepts a ref **or** a selector — agents guess selectors constantly |
+| `browser_wait_for` | outcome | Explicit waits only. **No `networkidle`** |
+| `browser_session_diagnostics` | timeline from `/agent-traces` + `/logs` | **P1, not polish.** Nobody else can build this |
+| `browser_session_replay` | safe Steel dashboard link | Explicit watch/replay request only; finished session by Steel UUID, or latest released; never starts a browser |
+| `browser_batch` | one snapshot at the end, stops at first failure | Where the round-trip win lives |
+| `browser_session_live_view` | scoped CDP connection details, no page content | Shipped with §14.A. `_meta.ui.visibility: ['app']`, so a supporting host keeps it out of the model's list; last in the tool table so every other tool's bytes stay identical |
 
 Plus a **server `instructions` string** (≤2KB) as a reviewed deliverable. Claude Code enables MCP tool search by default, which makes this the primary discovery surface. Write it in the user's language — JS-rendered pages, sites that block plain fetch, login-gated content, CAPTCHAs, multi-step forms — not Steel's architecture.
 
@@ -179,7 +179,7 @@ when the tools do.
 
 ### Deliberately not shipping
 
-`run_task(natural_language)` (violates the non-goal) · `steel_search` (**cloud has no `/v1/search`** — OSS-only, so it would break on cloud) · `steel_execute_js` in the hosted default (`full` profile only) · credential-management tools (routing secrets through model context defeats the feature; `steel_session_options` exposes only safe metadata and activates a namespace) · extension management · model-visible local paths or file bytes (the trusted viewer owns local file selection) · tab management (avoids per-target attach memory exhaustion) · **any catch-all `steel_request(method, path)`** — Anthropic's most-documented rejection reason · separate proxies/captcha/region/profile CRUD tools (advanced session setup stays in one deterministic planner).
+`run_task(natural_language)` (violates the non-goal) · `steel_search` (**cloud has no `/v1/search`** — OSS-only, so it would break on cloud) · `steel_execute_js` in the hosted default (`full` profile only) · credential-management tools (routing secrets through model context defeats the feature; `browser_session_options` exposes only safe metadata and activates a namespace) · extension management · model-visible local paths or file bytes (the trusted viewer owns local file selection) · tab management (avoids per-target attach memory exhaustion) · **any catch-all `steel_request(method, path)`** — Anthropic's most-documented rejection reason · separate proxies/captcha/region/profile CRUD tools (advanced session setup stays in one deterministic planner).
 
 ## 8. Page representation and token economics
 
@@ -283,10 +283,10 @@ against the extension specs and the installed SDK.
 
 ### 14.A MCP Apps (`io.modelcontextprotocol/ui`) — inline live session viewer
 
-**What shipped:** `steel_session_create` declares `_meta.ui.resourceUri: "ui://steel/session-viewer"`.
+**What shipped:** `browser_session_create` declares `_meta.ui.resourceUri: "ui://browser/session-viewer"`.
 The server registers that `ui://` resource: one static HTML shell (`text/html;profile=mcp-app`,
 self-contained, no external scripts) that the host renders in a sandboxed iframe. The shell asks
-`steel_session_live_view` for the session's scoped CDP token over the postMessage bridge, opens the
+`browser_session_live_view` for the session's scoped CDP token over the postMessage bridge, opens the
 CDP socket itself, and paints `Page.screencastFrame` onto a canvas; input on that canvas is
 forwarded back to the page over the same socket. It does **not** embed Steel's player: Claude allows
 no third-party iframe at all (measured below), which is what killed the original embedding design.
@@ -343,7 +343,7 @@ protocol machinery.
    CDP-screencast fallback is dead; do not build it" — that was wrong**, and painting screencast
    frames to a canvas is what the shipped viewer does.
 2. `capabilities.extensions["io.modelcontextprotocol/ui"]` and `resources: {listChanged: false}` are
-   declared; the shell is served at `ui://steel/session-viewer` with a per-resource
+   declared; the shell is served at `ui://browser/session-viewer` with a per-resource
    `ttlMs` = 1h / `cacheScope: 'public'` hint that deliberately overrides the private
    `resources/read` hint next to it. No per-session data is baked in — the shell is byte-identical
    for every caller, and everything session-specific arrives over the bridge.
@@ -354,9 +354,9 @@ protocol machinery.
    over "pure display in v1" — forwards mouse, keyboard and scroll input back through
    `Input.dispatchMouseEvent` / `dispatchKeyEvent` / `insertText`, which is what makes the handoff
    in §9 finish inside the conversation.
-4. `_meta.ui.resourceUri` is on `steel_session_create`; the text content is unchanged, so a host
+4. `_meta.ui.resourceUri` is on `browser_session_create`; the text content is unchanged, so a host
    without the extension sees exactly what it saw before. The app gets its connection details from
-   `steel_session_live_view`, an app-only tool (`visibility: ['app']`) that authorizes its handle
+   `browser_session_live_view`, an app-only tool (`visibility: ['app']`) that authorizes its handle
    like every other tool, because visibility is host-side list filtering and not a security
    boundary (NOTES §2).
 5. Security: page-derived text never flows into the template, the app renders the *browser* rather
@@ -372,7 +372,7 @@ protocol machinery.
 
 ### 14.B Tasks (`io.modelcontextprotocol/tasks`) — durable handles for long operations
 
-**What it would ship:** `steel_batch` returns `resultType: "task"` with a `taskId` when a run will
+**What it would ship:** `browser_batch` returns `resultType: "task"` with a `taskId` when a run will
 outlive host timeouts; the client polls `tasks/get`; a login wall mid-batch moves the task to
 `input_required` carrying an elicitation the client answers via `tasks/update` — pointing the human
 at the §14.A viewer. `tasks/cancel` maps to releasing the drive loop, never silently to releasing
@@ -386,7 +386,7 @@ Hand-rolling the wire format now means owning details the SDK will ship helpers 
 
 **Design decisions banked (cheap while waiting, expensive to retrofit):**
 
-- **Task-capable tools:** `steel_batch` only. Single-action tools resolve inside any host timeout;
+- **Task-capable tools:** `browser_batch` only. Single-action tools resolve inside any host timeout;
   a task handle would add a poll round-trip for nothing.
 - **Spec MUST honored at the call site:** never return a task to a caller whose *current request*
   didn't declare the extension — checked per request like everything else in the stateless model,
@@ -400,7 +400,7 @@ Hand-rolling the wire format now means owning details the SDK will ship helpers 
 - **TTL discipline:** a task must not outlive the browser it drives. `ttlMs` ≤ the session's
   remaining hard timeout; a task parked on `input_required` is deliberately *not* exempt from the
   session clock — the status message states the expiry so the cost of waiting is visible.
-- **Budgets:** a completed task's `result` is a normal `steel_batch` result and obeys §8 budgets;
+- **Budgets:** a completed task's `result` is a normal `browser_batch` result and obeys §8 budgets;
   polling responses stay tiny (status, message, `pollIntervalMs`).
 
 **Estimate once the SDK ships:** ~1 week — task state machine + store with full unit coverage,
@@ -417,11 +417,11 @@ these are the deliberate deferrals, recorded so they are decisions rather than o
 |---|---|---|
 | 1 | **A rate-limited call emits no span.** `meteredHost` charges the budget outside `guard`, so a throttled call returns before the tracing wrapper opens — the one event an operator most wants ("which principal is hitting the budget, on which tool") is the only one with no telemetry, and the only `isError` path `recordSpanFailure` can never see | Layering change, not a defect. Fix by charging inside `guard` or opening the span in the metered wrapper; the constraint that `requestState` verification precedes the charge is unaffected either way |
 | 2 | **A handoff is indistinguishable from a success in traces.** An `input_required` result correctly ends its span UNSET, but nothing marks it, so "how often are we asking humans, and on which tool" is unanswerable | Wants a `steel.handoff.round` span attribute plus a span-status assertion for the `input_required` outcome, which the tracing suite currently only covers for plain successes |
-| 3 | **MRTR detection costs a full a11y snapshot on every `steel_navigate` and `steel_act`** — and a second one when `include_snapshot` is true, because `snapshotSection` only reuses the cached snapshot when a cursor was passed. It also uses the *full* tree where the rendered path uses `interactiveOnly` | Contradicts `steel_navigate`'s own description (the CDP cost is now paid regardless; only tokens are saved). Element refs are safe — verified, `lastSeenSnapshotId` is recorded before the keep filter, so the detection snapshot refreshes rather than supersedes. Cheapest fix: have `snapshotSection` reuse the detection snapshot |
-| 4 | **`steel_batch` is 6 units for up to 20 steps and has no handoff wiring.** Twenty `steel_act` calls cost 60 individually, 6 batched — a 10× discount on the tool with the heaviest CDP load; and a batch step hitting a login wall gets the plain error, though form-filling and checkout stepping are exactly the flows batch exists for | Both look intentional, so flagging rather than changing. If the pricing is deliberate it belongs in the `TOOL_COSTS` comment, which currently argues the other way |
+| 3 | **MRTR detection costs a full a11y snapshot on every `browser_navigate` and `browser_act`** — and a second one when `include_snapshot` is true, because `snapshotSection` only reuses the cached snapshot when a cursor was passed. It also uses the *full* tree where the rendered path uses `interactiveOnly` | Contradicts `browser_navigate`'s own description (the CDP cost is now paid regardless; only tokens are saved). Element refs are safe — verified, `lastSeenSnapshotId` is recorded before the keep filter, so the detection snapshot refreshes rather than supersedes. Cheapest fix: have `snapshotSection` reuse the detection snapshot |
+| 4 | **`browser_batch` is 6 units for up to 20 steps and has no handoff wiring.** Twenty `browser_act` calls cost 60 individually, 6 batched — a 10× discount on the tool with the heaviest CDP load; and a batch step hitting a login wall gets the plain error, though form-filling and checkout stepping are exactly the flows batch exists for | Both look intentional, so flagging rather than changing. If the pricing is deliberate it belongs in the `TOOL_COSTS` comment, which currently argues the other way |
 | 5 | **The hosted `tenants` map never evicts.** Pre-existing, not from P2 — but the limiter next door prunes at 4096 principals, so the asymmetry is now visible | Unbounded growth keyed by principal on a long-lived replica. Wants the same pruning treatment |
 | 6 | **`forget()` deletes the record key unconditionally while `list()` passes the caller's principal**, so a stale index entry naming another tenant's handle would delete that tenant's record | Unreachable: handles are 128 bits of CSPRNG, the live-index member would survive, and the next sweep self-heals. Becomes live only if handles ever stop being random |
-| 7 | **`steel_session_diagnostics` filters `since` client-side**, after fetching the whole timeline. Both Steel endpoints accept `startTime`/`endTime`, and one page load produces ~84 log entries, so the waste is real | Small change, pure efficiency, no correctness impact. Do it when the tool is next touched |
+| 7 | **`browser_session_diagnostics` filters `since` client-side**, after fetching the whole timeline. Both Steel endpoints accept `startTime`/`endTime`, and one page load produces ~84 log entries, so the waste is real | Small change, pure efficiency, no correctness impact. Do it when the tool is next touched |
 
 **Steel API shapes still unverified** (2026-07-31, after a live probe settled the envelope bugs). Each is
 handled tolerantly in `src/core/steel/diagnostics.ts` rather than assumed, so none is a live defect:

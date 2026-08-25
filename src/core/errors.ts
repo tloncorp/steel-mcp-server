@@ -70,7 +70,7 @@ const BROWSER_TOOL_LIMIT_TEXT =
     'Steel enforces two separate limits: 20 requests/min Browser Tools (scrape, screenshot, pdf) and 60 requests/min overall on Launch.';
 
 const CONCURRENCY_LIMIT_TEXT =
-    'You are at the concurrent session cap for this plan (10 on Launch, 100 on Scale). Release a session with steel_session_release before creating another.';
+    'You are at the concurrent session cap for this plan (10 on Launch, 100 on Scale). Release a session with browser_session_release before creating another.';
 
 const ACCOUNT_LIMIT_TEXT =
     'The Steel account API is rate limited; this is separate from Browser Tools and session concurrency.';
@@ -429,7 +429,7 @@ export function batchInteractiveBlockError(
         'Do not rerun completed steps.';
     const next = context.nextStep === null ? 'No batch step remains.' : `Resume at step ${context.nextStep}.`;
     const guidance = context.clearableByPerson
-        ? 'Call steel_session_handoff with this same session_id, then submit only the unrun steps in a new batch.'
+        ? 'Call browser_session_handoff with this same session_id, then submit only the unrun steps in a new batch.'
         : 'Follow the mitigation advice above, then submit only the unrun steps; human handoff is not offered for this block.';
     return new SteelToolError(`${base.message} ${accounting} ${next} ${guidance}`, {
         code: base.code,
@@ -508,8 +508,8 @@ export interface StaleRefContext {
 export function staleRefError(ref: string, context: StaleRefContext): SteelToolError {
     return new SteelToolError(
         `${ref} belongs to snapshot ${context.refSnapshotId} but ${STALE_REASON_TEXT[context.reason]}; ` +
-            `the current snapshot is ${context.currentSnapshotId}. Call steel_find to relocate just this element, ` +
-            'or steel_snapshot for the whole page, then retry with the new ref.',
+            `the current snapshot is ${context.currentSnapshotId}. Call browser_find to relocate just this element, ` +
+            'or browser_snapshot for the whole page, then retry with the new ref.',
         { code: 'stale_ref', details: { ref, ...context } }
     );
 }
@@ -523,13 +523,13 @@ export function clickBlockedError(
 ): SteelToolError {
     const recovery = episodeExhausted
         ? 'Related controls are still blocked after multiple safe recovery attempts. Stop trying click variants; ' +
-          'change path, try another candidate, or call steel_session_handoff for manual control.'
+          'change path, try another candidate, or call browser_session_handoff for manual control.'
         : repeated
           ? 'This control is still blocked after a recovery attempt. Do not retry it again; change strategy, ' +
-            'try another candidate, or call steel_session_handoff for manual control.'
-          : 'Run steel_act with action "dismiss_overlays", or scroll the target into a clear area, then use ' +
-            'steel_find or steel_snapshot to reacquire it and retry once. If it is still blocked, change strategy ' +
-            'or call steel_session_handoff instead of repeating the same loop.';
+            'try another candidate, or call browser_session_handoff for manual control.'
+          : 'Run browser_act with action "dismiss_overlays", or scroll the target into a clear area, then use ' +
+            'browser_find or browser_snapshot to reacquire it and retry once. If it is still blocked, change strategy ' +
+            'or call browser_session_handoff instead of repeating the same loop.';
     return new SteelToolError(
         `Click on ${ref} did not reach the element: ${coveringDescription} is on top of it at that point. ${recovery}`,
         {
@@ -548,9 +548,9 @@ export function clickBlockedError(
 export function clickHitTestUnstableError(ref: string, repeated = false): SteelToolError {
     const recovery = repeated
         ? 'Hit-testing this control is still unstable after a fresh recovery. Do not retry it again; change ' +
-          'strategy, try another candidate, or call steel_session_handoff for manual control.'
-        : 'Use steel_find or steel_snapshot to relocate it, then retry once. If that also fails, change strategy ' +
-          'or call steel_session_handoff instead of repeating the same loop.';
+          'strategy, try another candidate, or call browser_session_handoff for manual control.'
+        : 'Use browser_find or browser_snapshot to relocate it, then retry once. If that also fails, change strategy ' +
+          'or call browser_session_handoff instead of repeating the same loop.';
     return new SteelToolError(
         `Could not safely click ${ref}: Chrome found no page node at any point inside it after re-reading its ` +
             `layout. The control may be moving or outside the viewport. ${recovery}`,
@@ -570,9 +570,9 @@ export function clickHitTestUnstableError(ref: string, repeated = false): SteelT
 export function clickLayoutUnavailableError(ref: string, repeated = false): SteelToolError {
     const recovery = repeated
         ? 'This control still has no clickable layout after a recovery attempt. Do not retry it again; change ' +
-          'strategy, try another candidate, or call steel_session_handoff for manual control.'
-        : 'It may be hidden or collapsed. Use steel_find or steel_snapshot to relocate it and retry once. If it ' +
-          'still has no layout, change strategy or call steel_session_handoff instead of repeating the same loop.';
+          'strategy, try another candidate, or call browser_session_handoff for manual control.'
+        : 'It may be hidden or collapsed. Use browser_find or browser_snapshot to relocate it and retry once. If it ' +
+          'still has no layout, change strategy or call browser_session_handoff instead of repeating the same loop.';
     return new SteelToolError(`Could not safely click ${ref}: the target has no layout box. ${recovery}`, {
         code: 'click_blocked',
         details: { ref, reason: 'no_layout_box', ...(repeated ? { handoff_required: true } : {}) },
@@ -584,7 +584,7 @@ export type SelfHostCapability = 'concurrency' | 'use_proxy' | 'solve_captcha' |
 
 const SELF_HOST_TEXT: Record<SelfHostCapability, string> = {
     concurrency:
-        'Self-hosted Steel runs one browser session at a time. Call steel_session_release on the existing session before creating another.',
+        'Self-hosted Steel runs one browser session at a time. Call browser_session_release on the existing session before creating another.',
     use_proxy:
         'Steel-managed proxies are a cloud capability; the self-hosted image has none. Remove use_proxy, or point STEEL_BASE_URL at Steel Cloud.',
     solve_captcha:

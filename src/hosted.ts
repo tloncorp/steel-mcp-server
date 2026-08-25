@@ -60,10 +60,10 @@ function parseList(raw: string | undefined): string[] {
 /**
  * Starts the hosted server.
  *
- * Every caller authenticates to Steel with their own key, so the configuration is built per
- * credential rather than once. The environment supplies everything else: the endpoint, the profile,
- * the timeouts, and — with `REDIS_URL` — the shared handle store that lets one replica serve a
- * handle another minted.
+ * Every caller supplies a credential that becomes its tenant principal. Against Steel Cloud that
+ * same credential also authenticates the Steel API client. Against a self-hosted browser it is only
+ * a tenant boundary: the local browser needs no credential and never receives it. The environment
+ * supplies everything else: the endpoint, profile, timeouts, and optional shared handle store.
  */
 export async function startHostedServer(options: HostedServerOptions): Promise<HostedServer> {
     const { env } = options;
@@ -86,13 +86,6 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
     // Built once with a placeholder so a broken profile, timeout or base URL fails here rather than
     // on some caller's first request. The credential is replaced per request and never reused.
     const template = loadConfig({ ...env, STEEL_API_KEY: 'startup-check' });
-    if (template.deployment !== 'cloud') {
-        throw new Error(
-            'The hosted entrypoint serves many callers, each authenticating with their own Steel key, ' +
-                'so it cannot run against a self-hosted browser that has no per-caller credential. ' +
-                'Run the stdio entrypoint for a self-hosted deployment.'
-        );
-    }
     for (const warning of template.warnings) log('info', warning);
 
     // Started before the runtime so the tracer the core resolves is already the real one.

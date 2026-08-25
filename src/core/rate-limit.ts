@@ -26,40 +26,40 @@ export interface RateLimiter {
  * Tools call** spends one of the twenty per minute the whole org shares. So the weights track
  * which of those two a call consumes:
  *
- * - `steel_session_create` claims a concurrency slot for minutes, so it is the most expensive call
+ * - `browser_session_create` claims a concurrency slot for minutes, so it is the most expensive call
  *   on the surface by a wide margin.
- * - `steel_batch` fans out to many CDP round-trips inside one request.
- * - `steel_navigate`, `steel_act` and `steel_snapshot` each keep a live session busy.
- * - `steel_find`, `steel_wait_for` and `steel_session_diagnostics` work against a session that is
+ * - `browser_batch` fans out to many CDP round-trips inside one request.
+ * - `browser_navigate`, `browser_act` and `browser_snapshot` each keep a live session busy.
+ * - `browser_find`, `browser_wait_for` and `browser_session_diagnostics` work against a session that is
  *   already open and add no new load of their own.
- * - `steel_scrape`, `steel_screenshot` and `steel_pdf` are single Browser Tools calls that start no
+ * - `browser_scrape`, `browser_screenshot` and `browser_pdf` are single Browser Tools calls that start no
  *   session, so they are the cheapest thing a rate-limited agent can be steered towards.
- * - `steel_session_live_view` is one session read for the inline viewer. It touches no browser and
+ * - `browser_session_live_view` is one session read for the inline viewer. It touches no browser and
  *   spends no Browser Tools call, and the app re-asks for it whenever its stream reconnects, so
  *   pricing it like a navigation would let a flapping viewer eat an agent's whole budget.
- * - `steel_session_replay` reads one finished session and returns its safe dashboard link. It starts no
+ * - `browser_session_replay` reads one finished session and returns its safe dashboard link. It starts no
  *   browser and consumes no concurrency slot, so it costs the same as another stateless read.
- * - `steel_session_release` is free: charging for handing a slot back would protect nothing and
+ * - `browser_session_release` is free: charging for handing a slot back would protect nothing and
  *   would keep a browser billing while its owner waited out a budget.
  */
 export const TOOL_COSTS: Readonly<Record<string, number>> = {
-    steel_session_create: 10,
-    steel_batch: 6,
-    steel_navigate: 3,
-    steel_act: 3,
-    steel_snapshot: 3,
-    steel_find: 2,
-    steel_wait_for: 2,
-    steel_session_diagnostics: 2,
-    steel_scrape: 1,
-    steel_screenshot: 1,
-    steel_pdf: 1,
-    steel_session_handoff: 1,
-    steel_session_replay: 1,
-    steel_session_options: 3,
+    browser_session_create: 10,
+    browser_batch: 6,
+    browser_navigate: 3,
+    browser_act: 3,
+    browser_snapshot: 3,
+    browser_find: 2,
+    browser_wait_for: 2,
+    browser_session_diagnostics: 2,
+    browser_scrape: 1,
+    browser_screenshot: 1,
+    browser_pdf: 1,
+    browser_session_handoff: 1,
+    browser_session_replay: 1,
+    browser_session_options: 3,
     // App control heartbeats must not consume the model's browser budget.
-    steel_session_live_view: 0,
-    steel_session_release: 0,
+    browser_session_live_view: 0,
+    browser_session_release: 0,
 };
 
 /** Charged to a tool the table does not name, so a tool added later is never accidentally free. */
@@ -81,9 +81,9 @@ export interface RateLimitPolicy {
  * The shipped budget.
  *
  * 20 units/minute is Steel's per-org Browser Tools cap expressed in units, so a caller doing
- * nothing but `steel_scrape` paces exactly at that limit instead of collecting 429s. The 40-unit
+ * nothing but `browser_scrape` paces exactly at that limit instead of collecting 429s. The 40-unit
  * bucket is two minutes of budget, which absorbs an agent's opening burst while still capping
- * sustained `steel_session_create` at two per minute. Steel enforces the independent concurrency
+ * sustained `browser_session_create` at two per minute. Steel enforces the independent concurrency
  * ceiling, while the MCP budget prevents a caller from hammering session creation up to that edge.
  */
 export const DEFAULT_RATE_LIMIT_POLICY: RateLimitPolicy = { refillPerMinute: 20, burstCapacity: 40 };
@@ -121,8 +121,8 @@ export function rateLimitedError(rejection: RateLimitRejection): SteelToolError 
             `Retry after ${retryAfterSeconds}s. ` +
             'The budget protects the concurrent-session cap of this plan and the separate 20 requests/min ' +
             'Browser Tools limit, both of which every call on this credential shares. ' +
-            'steel_scrape, steel_screenshot and steel_pdf are the cheapest calls and start no session; ' +
-            'steel_session_release always goes through and hands a concurrency slot back.',
+            'browser_scrape, browser_screenshot and browser_pdf are the cheapest calls and start no session; ' +
+            'browser_session_release always goes through and hands a concurrency slot back.',
         {
             code: 'rate_limited',
             retryAfterSeconds,

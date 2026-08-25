@@ -141,7 +141,7 @@ async function connectLegacy(options: HarnessOptions = {}): Promise<Harness> {
 }
 
 async function newSession(harness: Harness): Promise<string> {
-    const result = await harness.client.callTool({ name: 'steel_session_create', arguments: {} });
+    const result = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
     const structured = result.structuredContent as { session_id?: string } | undefined;
     if (!structured?.session_id) throw new Error(`session_create failed: ${JSON.stringify(result.content)}`);
     return structured.session_id;
@@ -172,7 +172,7 @@ describe('explicit session handoff', () => {
         const harness = await connectModern({ deps: testDeps({ page: plainPage }), autoFulfill: false });
         const handle = await newSession(harness);
         const result = (await harness.client.callTool(
-            { name: 'steel_session_handoff', arguments: { session_id: handle, reason: 'review' } },
+            { name: 'browser_session_handoff', arguments: { session_id: handle, reason: 'review' } },
             { allowInputRequired: true }
         )) as unknown as {
             resultType?: string;
@@ -222,13 +222,13 @@ describe('explicit session handoff', () => {
         const handle = await newSession(harness);
         const steelSessionId = harness.deps.api.created[0]!.sessionId;
         const before = await harness.client.callTool({
-            name: 'steel_snapshot',
+            name: 'browser_snapshot',
             arguments: { session_id: handle },
         });
         expect(textOf(before)).toContain('Cart contains one Mario Kart bundle');
 
         const result = await harness.client.callTool({
-            name: 'steel_session_handoff',
+            name: 'browser_session_handoff',
             arguments: { session_id: handle, reason: 'manual_step' },
         });
 
@@ -238,14 +238,14 @@ describe('explicit session handoff', () => {
         await expect(harness.deps.registry.resolveForAgent(handle, harness.deps.principal)).resolves.toBeTruthy();
 
         const after = await harness.client.callTool({
-            name: 'steel_snapshot',
+            name: 'browser_snapshot',
             arguments: { session_id: handle },
         });
         expect(textOf(after)).toContain('Cart contains one Mario Kart bundle');
         expect(textOf(after)).toContain('Pickup confirmed by the person');
         expect(harness.deps.api.created).toHaveLength(1);
 
-        await harness.client.callTool({ name: 'steel_session_release', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_session_release', arguments: { session_id: handle } });
         expect(harness.deps.api.released).toEqual([steelSessionId]);
         expect(harness.deps.pool.closed).toEqual([steelSessionId]);
     });
@@ -254,7 +254,7 @@ describe('explicit session handoff', () => {
         const harness = await connectModern({ deps: testDeps({ page: plainPage }), capabilities: {} });
         const handle = await newSession(harness);
         const result = await harness.client.callTool({
-            name: 'steel_session_handoff',
+            name: 'browser_session_handoff',
             arguments: { session_id: handle, reason: 'review' },
         });
 
@@ -270,7 +270,7 @@ describe('explicit session handoff', () => {
         });
         const handle = await newSession(harness);
         const result = await harness.client.callTool({
-            name: 'steel_session_handoff',
+            name: 'browser_session_handoff',
             arguments: { session_id: handle, reason: 'sensitive_input' },
         });
 
@@ -288,7 +288,7 @@ describe('input_required for a login wall', () => {
         const handle = await newSession(harness);
 
         const result = (await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
             { allowInputRequired: true }
         )) as unknown as {
             resultType?: string;
@@ -316,7 +316,7 @@ describe('input_required for a login wall', () => {
         const handle = await newSession(harness);
 
         const result = (await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
             { allowInputRequired: true }
         )) as unknown as { inputRequests?: Record<string, { params: UrlElicitation }> };
 
@@ -337,7 +337,7 @@ describe('input_required for a login wall', () => {
         const handle = await newSession(harness);
 
         const result = (await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: phishing } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: phishing } },
             { allowInputRequired: true }
         )) as unknown as { inputRequests?: Record<string, { params: UrlElicitation }> };
 
@@ -353,7 +353,7 @@ describe('input_required for a login wall', () => {
         // its own count per handle, so omitting the state buys no extra prompts.
         const harness = await connectModern({ deps: testDeps({ page: loginWallPage }), autoFulfill: false });
         const handle = await newSession(harness);
-        const call = { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } };
+        const call = { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } };
 
         const results: Array<{ resultType?: string; isError?: boolean }> = [];
         for (let attempt = 0; attempt <= MAX_HANDOFF_ROUNDS; attempt++) {
@@ -394,7 +394,7 @@ describe('input_required for a login wall', () => {
             const replica = attempt % 2 === 0 ? first : second;
             results.push(
                 (await replica.client.callTool(
-                    { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+                    { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
                     { allowInputRequired: true }
                 )) as unknown as { resultType?: string; isError?: boolean }
             );
@@ -408,7 +408,7 @@ describe('input_required for a login wall', () => {
         const harness = await connectModern({ deps: testDeps({ page: loginWallPage }), autoFulfill: false });
         const handle = await newSession(harness);
         await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
             { allowInputRequired: true }
         );
 
@@ -429,7 +429,7 @@ describe('the retry after a person has finished', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -445,7 +445,7 @@ describe('the retry after a person has finished', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -462,7 +462,7 @@ describe('the retry after a person has finished', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -512,20 +512,20 @@ describe('the tools that can hit a wall', () => {
         const harness = await connectModern({ deps: testDeps({ page: plainPage }) });
         const handle = await newSession(harness);
         const steelSessionId = harness.deps.api.created[0]!.sessionId;
-        await harness.client.callTool({ name: 'steel_snapshot', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
         const fixture = harness.deps.pool.fixtureFor(steelSessionId)!;
         fixture.stub('DOM.getNodeForLocation', () => {
             throw new Error('DOM.getNodeForLocation failed: No node found at given location');
         });
 
         const first = await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'click', target: '@e1' },
         });
         expect(first.isError).toBe(true);
 
         const handedBack = await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'click', target: '@e1' },
         });
 
@@ -540,16 +540,16 @@ describe('the tools that can hit a wall', () => {
         const harness = await connectModern({ deps: testDeps({ page: plainPage }), capabilities: {} });
         const handle = await newSession(harness);
         const steelSessionId = harness.deps.api.created[0]!.sessionId;
-        await harness.client.callTool({ name: 'steel_snapshot', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
         const fixture = harness.deps.pool.fixtureFor(steelSessionId)!;
         fixture.stub('DOM.getNodeForLocation', () => ({}));
 
         await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'click', target: '@e1' },
         });
         const repeated = await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'click', target: '@e1' },
         });
 
@@ -573,12 +573,12 @@ describe('the tools that can hit a wall', () => {
             onElicit: () => setPage(harness, plainPage()),
         });
         const created = await harness.client.callTool({
-            name: 'steel_session_create',
+            name: 'browser_session_create',
             arguments: { namespace: 'managed' },
         });
         const handle = (created as { structuredContent?: { session_id?: string } }).structuredContent?.session_id;
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/login' },
         });
         expect(graceCalls).toBe(1);
@@ -595,7 +595,7 @@ describe('the tools that can hit a wall', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://shop.test/cart' },
         });
 
@@ -612,10 +612,10 @@ describe('the tools that can hit a wall', () => {
             onElicit: () => setPage(harness, cartPage(false)),
         });
         const handle = await newSession(harness);
-        await harness.client.callTool({ name: 'steel_snapshot', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
 
         const result = await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'click', target: '@e1' },
         });
 
@@ -634,7 +634,7 @@ describe('the tools that can hit a wall', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_wait_for',
+            name: 'browser_wait_for',
             arguments: { session_id: handle, text: 'Save', timeout_ms: 50 },
         });
 
@@ -648,7 +648,7 @@ describe('the tools that can hit a wall', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_wait_for',
+            name: 'browser_wait_for',
             arguments: { session_id: handle, text: 'Never', timeout_ms: 50 },
         });
 
@@ -662,7 +662,7 @@ describe('the tools that can hit a wall', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://shop.test/products' },
         });
 
@@ -676,7 +676,7 @@ describe('the tools that can hit a wall', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://example.com/' },
         });
 
@@ -685,7 +685,7 @@ describe('the tools that can hit a wall', () => {
     });
 });
 
-describe('steel_batch handoff boundaries', () => {
+describe('browser_batch handoff boundaries', () => {
     it('stops after a completed navigation and resumes only the unrun work after explicit handoff', async () => {
         let harness: Harness;
         harness = await connectModern({
@@ -695,12 +695,12 @@ describe('steel_batch handoff boundaries', () => {
         const handle = await newSession(harness);
 
         const blocked = await harness.client.callTool({
-            name: 'steel_batch',
+            name: 'browser_batch',
             arguments: {
                 session_id: handle,
                 steps: [
-                    { tool: 'steel_navigate', arguments: { url: 'https://app.test/login' } },
-                    { tool: 'steel_act', arguments: { action: 'scroll', value: '100' } },
+                    { tool: 'browser_navigate', arguments: { url: 'https://app.test/login' } },
+                    { tool: 'browser_act', arguments: { action: 'scroll', value: '100' } },
                 ],
             },
         });
@@ -713,21 +713,21 @@ describe('steel_batch handoff boundaries', () => {
             handoff_required: true,
         });
         expect(textOf(blocked)).toMatch(/do not rerun completed steps/i);
-        expect(textOf(blocked)).toMatch(/steel_session_handoff.*same session_id/i);
+        expect(textOf(blocked)).toMatch(/browser_session_handoff.*same session_id/i);
         expect(harness.elicited).toHaveLength(0);
 
         const handedBack = await harness.client.callTool({
-            name: 'steel_session_handoff',
+            name: 'browser_session_handoff',
             arguments: { session_id: handle, reason: 'manual_step' },
         });
         expect(handedBack.isError).toBeFalsy();
         expect(harness.elicited).toHaveLength(1);
 
         const resumed = await harness.client.callTool({
-            name: 'steel_batch',
+            name: 'browser_batch',
             arguments: {
                 session_id: handle,
-                steps: [{ tool: 'steel_act', arguments: { action: 'scroll', value: '100' } }],
+                steps: [{ tool: 'browser_act', arguments: { action: 'scroll', value: '100' } }],
             },
         });
         expect(resumed.isError).toBeFalsy();
@@ -744,10 +744,10 @@ describe('steel_batch handoff boundaries', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_batch',
+            name: 'browser_batch',
             arguments: {
                 session_id: handle,
-                steps: [{ tool: 'steel_navigate', arguments: { url: 'https://app.test/login' } }],
+                steps: [{ tool: 'browser_navigate', arguments: { url: 'https://app.test/login' } }],
             },
         });
         const error = (result.structuredContent as { error?: { details?: Record<string, unknown> } })?.error;
@@ -764,7 +764,7 @@ describe('graceful degradation', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -782,7 +782,7 @@ describe('graceful degradation', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -797,7 +797,7 @@ describe('graceful degradation', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -809,7 +809,7 @@ describe('graceful degradation', () => {
         const harness = await connectModern({ deps: testDeps({ page: loginWallPage }), capabilities: {} });
         const handle = await newSession(harness);
         await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -843,7 +843,7 @@ describe('inline viewer handoff (UI extension)', () => {
         const handle = await newSession(harness);
 
         const result = (await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
             { allowInputRequired: true }
         )) as unknown as {
             resultType?: string;
@@ -876,7 +876,7 @@ describe('inline viewer handoff (UI extension)', () => {
         const handle = await newSession(harness);
 
         const result = (await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
             { allowInputRequired: true }
         )) as unknown as Record<string, unknown>;
 
@@ -895,7 +895,7 @@ describe('inline viewer handoff (UI extension)', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -914,7 +914,7 @@ describe('inline viewer handoff (UI extension)', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -932,7 +932,7 @@ describe('inline viewer handoff (UI extension)', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -949,7 +949,7 @@ describe('inline viewer handoff (UI extension)', () => {
         });
         const handle = await newSession(harness);
         await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
             { allowInputRequired: true }
         );
 
@@ -970,7 +970,7 @@ describe('the inline path falls back to the external player', () => {
         const handle = await newSession(harness);
 
         const result = (await harness.client.callTool(
-            { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
+            { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } },
             { allowInputRequired: true }
         )) as unknown as { inputRequests?: Record<string, { params: UrlElicitation }> };
 
@@ -991,7 +991,7 @@ describe('the inline path falls back to the external player', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -1010,7 +1010,7 @@ describe('a retry carrying state the client edited', () => {
             onerror: error => errors.push(error),
         });
         const handle = await newSession(harness);
-        const call = { name: 'steel_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } };
+        const call = { name: 'browser_navigate', arguments: { session_id: handle, url: 'https://app.test/private' } };
         const first = (await harness.client.callTool(call, { allowInputRequired: true })) as unknown as {
             requestState?: string;
         };
@@ -1057,7 +1057,7 @@ describe('the 2025 wire era', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 
@@ -1071,7 +1071,7 @@ describe('the 2025 wire era', () => {
         const handle = await newSession(harness);
 
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://app.test/private' },
         });
 

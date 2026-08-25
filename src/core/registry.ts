@@ -140,7 +140,7 @@ export function principalFromCredential(credential: string): string {
 /** The message used for both an unknown handle and a handle belonging to someone else. */
 const NOT_FOUND_MESSAGE =
     'No live browser session for that session_id. It may have been released, may have expired, ' +
-    'or may belong to a different credential. Call steel_session_create to start a new one.';
+    'or may belong to a different credential. Call browser_session_create to start a new one.';
 
 /**
  * The one error for an unknown handle and for someone else's handle.
@@ -156,7 +156,7 @@ export function handleNotFoundError(): SteelToolError {
 export function handleExpiredError(handle: string): SteelToolError {
     return new SteelToolError(
         'That browser session reached its hard timeout and has been released by Steel. ' +
-            'Call steel_session_create to start a new one.',
+            'Call browser_session_create to start a new one.',
         { code: 'session_expired', details: { handle } }
     );
 }

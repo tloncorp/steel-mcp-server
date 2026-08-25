@@ -44,12 +44,12 @@ describe.skipIf(!available)(`billed-session teardown (${reason})`, () => {
         await client.connect(transport);
 
         const before = new Set(await liveSessionIds());
-        const created = await client.callTool({ name: 'steel_session_create', arguments: {} });
+        const created = await client.callTool({ name: 'browser_session_create', arguments: {} });
         const handle = (created as { structuredContent?: { session_id?: string } }).structuredContent?.session_id;
         expect(handle, `session_create failed: ${JSON.stringify(created)}`).toBeTruthy();
 
         await client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'http://fixture-site:8099/' },
         });
 

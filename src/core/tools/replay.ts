@@ -8,7 +8,7 @@ import { guard, successResult, uuidSchema } from './shared.js';
 
 const replayInputSchema = z
     .object({
-        steel_session_id: uuidSchema.optional().describe('Finished Steel UUID; omit for latest released.'),
+        finished_session_id: uuidSchema.optional().describe('Finished session UUID; omit for latest released.'),
     })
     .strict();
 
@@ -54,8 +54,8 @@ async function resolveReplayTarget(
             // not exist. Authentication failures for the credential itself remain distinct.
             if (error instanceof SteelToolError && (error.code === 'forbidden' || error.code === 'not_found')) {
                 throw new SteelToolError(
-                    'No Steel session with that UUID was found for this credential. Check the UUID in the Steel ' +
-                        "dashboard, or omit steel_session_id to open this credential's latest released session.",
+                    'No browser session with that UUID was found for this credential. Check the UUID in the session ' +
+                        "dashboard, or omit finished_session_id to open this credential's latest released session.",
                     { code: 'not_found' }
                 );
             }
@@ -67,8 +67,8 @@ async function resolveReplayTarget(
     const latest = recent.sessions[0];
     if (!latest) {
         throw new SteelToolError(
-            'No released Steel session was found for this credential. Pass steel_session_id with a finished ' +
-                'session UUID from the Steel dashboard. This tool never starts a replacement browser.',
+            'No released browser session was found for this credential. Pass finished_session_id with a finished ' +
+                'session UUID from the session dashboard. This tool never starts a replacement browser.',
             { code: 'not_found' }
         );
     }
@@ -81,17 +81,17 @@ async function resolveReplayTarget(
 /** Registers the public, read-only finished-session dashboard resolver. */
 export function registerSessionReplay(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_session_replay',
+        'browser_session_replay',
         {
             title: 'Open a finished session',
             description:
-                'Call only when the user explicitly asks to watch or replay a finished session. Returns its Steel ' +
-                'dashboard link without starting a browser; use steel_session_diagnostics to inspect or explain activity.',
+                'Call only when the user explicitly asks to watch or replay a finished session. Returns its ' +
+                'dashboard link without starting a browser; use browser_session_diagnostics to inspect or explain activity.',
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
             inputSchema: replayInputSchema,
         },
         async (args, ctx) =>
-            guard(deps, 'steel_session_replay', ctx.mcpReq, async () => {
+            guard(deps, 'browser_session_replay', ctx.mcpReq, async () => {
                 if (deps.config.deployment === 'self_hosted') {
                     throw new SteelToolError(
                         'Finished-session dashboard replay is a Steel Cloud capability. Point STEEL_BASE_URL at ' +
@@ -100,11 +100,11 @@ export function registerSessionReplay(host: ToolHost, deps: ServerDeps): void {
                     );
                 }
 
-                const target = await resolveReplayTarget(deps, args.steel_session_id, ctx.mcpReq.signal);
+                const target = await resolveReplayTarget(deps, args.finished_session_id, ctx.mcpReq.signal);
                 const status = typeof target.session.status === 'string' ? target.session.status : 'finished';
                 if (status.toLowerCase() === 'live') {
                     throw new SteelToolError(
-                        'That Steel session is still live. Use the live session viewer now, then release it before ' +
+                        'That browser session is still live. Use the live session viewer now, then release it before ' +
                             'requesting a finished-session replay.',
                         { code: 'invalid_argument' }
                     );
@@ -113,7 +113,7 @@ export function registerSessionReplay(host: ToolHost, deps: ServerDeps): void {
                 const dashboardUrl = safeDashboardUrl(target.session.sessionViewerUrl, target.session.id);
                 if (!dashboardUrl) {
                     throw new SteelToolError(
-                        'No safe Steel dashboard link is available for that finished session. Open it from the Steel ' +
+                        'No safe session dashboard link is available for that finished session. Open it from the ' +
                             'dashboard instead.',
                         { code: 'not_found' }
                     );
@@ -121,12 +121,12 @@ export function registerSessionReplay(host: ToolHost, deps: ServerDeps): void {
 
                 return successResult(
                     {
-                        result: `Resolved finished Steel session ${target.session.id} without starting a browser.`,
-                        links: `[Open finished session in Steel](${dashboardUrl})`,
+                        result: `Resolved finished browser session ${target.session.id} without starting a browser.`,
+                        links: `[Open finished session](${dashboardUrl})`,
                         notes: ['Inline replay is temporarily unavailable in this release.'],
                     },
                     {
-                        steel_session_id: target.session.id,
+                        finished_session_id: target.session.id,
                         status,
                         selected_by: target.selectedBy,
                         dashboard_url: dashboardUrl,

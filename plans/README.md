@@ -64,7 +64,7 @@ not authorize overwriting or discarding it.
   accept a separate host-owned MRTR input request.
 - Increase only the 15-minute hard-session default: rejected because Launch accounts
   clamp it to 15 minutes, so it cannot repair this observed run.
-- Treat `steel_session_handoff` as a workaround for Claude's tool-use cap: rejected.
+- Treat `browser_session_handoff` as a workaround for Claude's tool-use cap: rejected.
   The server cannot see Claude's remaining host budget, and handoff cannot extend the
   immutable hard expiry.
 - Promise that a saved profile or replacement session preserves a cart: rejected.
@@ -83,7 +83,7 @@ not authorize overwriting or discarding it.
 - Fold hit-test remote-object cleanup into the blocker-loop fix: deferred as an
   independent P2 performance task. It is real cleanup debt but did not cause this run.
 - Add separate profile-list, credential-list, proxy-list and recipe tools: rejected.
-  One deterministic `steel_session_options` result can carry safe candidates and a
+  One deterministic `browser_session_options` result can carry safe candidates and a
   signed configuration while adding only one model-visible tool.
 - Put account candidates in dynamic tool enums or `tools/list`: rejected because the
   list is publicly cached and must stay deterministic and principal-independent.

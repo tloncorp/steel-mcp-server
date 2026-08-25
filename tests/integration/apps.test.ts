@@ -63,7 +63,7 @@ function isError(result: unknown): boolean {
 }
 
 async function newSession(harness: Harness): Promise<string> {
-    const result = await harness.client.callTool({ name: 'steel_session_create', arguments: {} });
+    const result = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
     const structured = (result as { structuredContent?: { session_id?: string } }).structuredContent;
     if (!structured?.session_id) throw new Error(`session_create failed: ${textOf(result)}`);
     return structured.session_id;
@@ -79,7 +79,7 @@ interface LiveView {
 
 async function liveView(harness: Harness, sessionId?: string) {
     const result = await harness.client.callTool({
-        name: 'steel_session_live_view',
+        name: 'browser_session_live_view',
         arguments: sessionId === undefined ? {} : { session_id: sessionId },
     });
     return { result, structured: (result as { structuredContent?: LiveView }).structuredContent };
@@ -226,7 +226,7 @@ describe('the retired session-replay resource', () => {
         const { tools } = await harness.client.listTools();
 
         expect(resources.map(resource => resource.uri)).not.toContain(RETIRED_SESSION_REPLAY_URI);
-        expect(tools.map(tool => tool.name)).toContain('steel_session_replay');
+        expect(tools.map(tool => tool.name)).toContain('browser_session_replay');
     });
 
     it('returns not-found when an old host reads the retired URI', async () => {
@@ -235,29 +235,29 @@ describe('the retired session-replay resource', () => {
     });
 });
 
-describe('steel_session_create', () => {
+describe('browser_session_create', () => {
     it('is the only tool that points a supporting host at the session viewer', async () => {
         const harness = await connect();
         const { tools } = await harness.client.listTools();
         const viewerTools = tools
             .filter(tool => uiMetaOf(tool)?.resourceUri === SESSION_VIEWER_URI)
             .map(tool => tool.name);
-        expect(viewerTools).toEqual(['steel_session_create']);
+        expect(viewerTools).toEqual(['browser_session_create']);
     });
 
     it('returns exactly what it always did', async () => {
         const harness = await connect();
-        const result = await harness.client.callTool({ name: 'steel_session_create', arguments: {} });
+        const result = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
         expect(textOf(result)).toContain('Started a browser session.');
         expect(textOf(result)).toContain('Pass session_id="sess_');
     });
 });
 
-describe('steel_session_live_view', () => {
+describe('browser_session_live_view', () => {
     it('is listed, marked app-only, so a host filters it out of the agent’s tool list', async () => {
         const harness = await connect();
         const { tools } = await harness.client.listTools();
-        const liveViewTool = tools.find(tool => tool.name === 'steel_session_live_view');
+        const liveViewTool = tools.find(tool => tool.name === 'browser_session_live_view');
         expect(uiMetaOf(liveViewTool)?.visibility).toEqual(['app']);
     });
 
@@ -402,7 +402,7 @@ describe('steel_session_live_view', () => {
         const sessionId = await newSession(harness);
         await liveView(harness, sessionId);
 
-        const span = tracing.span('tools/call steel_session_live_view');
+        const span = tracing.span('tools/call browser_session_live_view');
         expect(JSON.stringify(span.attributes)).not.toContain('token=');
         await tracing.shutdown();
     });
@@ -411,7 +411,7 @@ describe('steel_session_live_view', () => {
         const harness = await connect();
         const sessionId = await newSession(harness);
         const acquire = await harness.client.callTool({
-            name: 'steel_session_live_view',
+            name: 'browser_session_live_view',
             arguments: { session_id: sessionId, action: 'acquire' },
         });
         const control = (acquire as { structuredContent?: LiveView }).structuredContent?.control;
@@ -420,7 +420,7 @@ describe('steel_session_live_view', () => {
         expect(textOf(acquire)).not.toContain(control?.token ?? 'ctl_');
 
         const blocked = await harness.client.callTool({
-            name: 'steel_snapshot',
+            name: 'browser_snapshot',
             arguments: { session_id: sessionId },
         });
         expect(isError(blocked)).toBe(true);
@@ -429,13 +429,13 @@ describe('steel_session_live_view', () => {
         );
 
         const renew = await harness.client.callTool({
-            name: 'steel_session_live_view',
+            name: 'browser_session_live_view',
             arguments: { session_id: sessionId, action: 'renew', control_token: control?.token },
         });
         expect((renew as { structuredContent?: LiveView }).structuredContent?.control?.token).toBe(control?.token);
 
         const released = await harness.client.callTool({
-            name: 'steel_session_live_view',
+            name: 'browser_session_live_view',
             arguments: { session_id: sessionId, action: 'release', control_token: control?.token },
         });
         expect((released as { structuredContent?: LiveView }).structuredContent?.control?.state).toBe('agent');
@@ -446,11 +446,11 @@ describe('steel_session_live_view', () => {
         const harness = await connect();
         const sessionId = await newSession(harness);
         await harness.client.callTool({
-            name: 'steel_session_live_view',
+            name: 'browser_session_live_view',
             arguments: { session_id: sessionId, action: 'acquire' },
         });
         const release = await harness.client.callTool({
-            name: 'steel_session_live_view',
+            name: 'browser_session_live_view',
             arguments: { session_id: sessionId, action: 'release', control_token: 'ctl_stale' },
         });
         expect(isError(release)).toBe(true);

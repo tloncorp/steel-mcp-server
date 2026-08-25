@@ -47,10 +47,11 @@ export const HUMAN_CONTROL_LEASE_MS = 60_000;
 
 export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_session_create',
+        'browser_session_create',
         {
             title: 'Start session',
-            description: 'Billed browser; profiles/credentials: use session_options; release promptly.',
+            description:
+                'Start an isolated browser that may have runtime costs; for profiles or credentials use browser_session_options; release promptly.',
             annotations: { destructiveHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
@@ -82,7 +83,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
             _meta: { ui: { resourceUri: SESSION_VIEWER_URI } },
         },
         async (args, ctx) =>
-            guard(deps, 'steel_session_create', ctx.mcpReq, async () => {
+            guard(deps, 'browser_session_create', ctx.mcpReq, async () => {
                 let planned: import('../session-plan.js').SessionPlanState | undefined;
                 if (args.configuration) {
                     try {
@@ -140,7 +141,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                         ? selfHostUnsupportedError('concurrency')
                         : new (await import('../errors.js')).SteelToolError(
                               `You already have ${live} live browser sessions, which is this deployment's limit. ` +
-                                  'Release one with steel_session_release before starting another.',
+                                  'Release one with browser_session_release before starting another.',
                               { code: 'rate_limited' }
                           );
                 }
@@ -259,7 +260,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                     {
                         result:
                             `Started a browser session. Pass session_id="${record.handle}" to the other browser tools, ` +
-                            'and call steel_session_release when finished. Keep this handle for the task: page/cart ' +
+                            'and call browser_session_release when finished. Keep this handle for the task: page/cart ' +
                             'state does not transfer to a replacement session.',
                         pageState: session.sessionViewerUrl
                             ? `Watch or take control in the live browser: ${session.sessionViewerUrl}`
@@ -268,15 +269,15 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                             `This session expires at ${expiresAt.toISOString()}; its lifetime cannot be extended after creation.`,
                             inactivityTimeout === undefined
                                 ? 'No separate inactivity timeout fits inside this short session lifetime.'
-                                : `Steel releases it after ${Math.round(inactivityTimeout / 1_000)} seconds without browser activity; active human input resets that clock.`,
+                                : `The service releases it after ${Math.round(inactivityTimeout / 1_000)} seconds without browser activity; active human input resets that clock.`,
                             ...(args.namespace
                                 ? [
-                                      'Managed credential injection was requested; this does not prove the site authenticated. Verify the page. If sign-in remains, do not guess another namespace: use steel_session_options before creating a replacement, or hand off this session. Never request or type a password.',
+                                      'Managed credential injection was requested; this does not prove the site authenticated. Verify the page. If sign-in remains, do not guess another namespace: use browser_session_options before creating a replacement, or hand off this session. Never request or type a password.',
                                   ]
                                 : []),
                             ...(!args.profile_id && !args.namespace
                                 ? [
-                                      'No saved identity was requested, so this is a fresh guest browser. If the task needs a saved login, call steel_session_options before creating the session.',
+                                      'No saved identity was requested, so this is a fresh guest browser. If the task needs a saved login, call browser_session_options before creating the session.',
                                   ]
                                 : []),
                         ],
@@ -327,7 +328,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
 
 export function registerSessionRelease(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_session_release',
+        'browser_session_release',
         {
             title: 'Release a browser session',
             description:
@@ -338,7 +339,7 @@ export function registerSessionRelease(host: ToolHost, deps: ServerDeps): void {
             inputSchema: z.object({ session_id: sessionIdSchema }).strict(),
         },
         async (args, ctx) =>
-            guard(deps, 'steel_session_release', ctx.mcpReq, async () => {
+            guard(deps, 'browser_session_release', ctx.mcpReq, async () => {
                 const record = await deps.registry.resolveForAgent(args.session_id, deps.principal).catch(error => {
                     if (error instanceof SteelToolError && error.code === 'human_control_active') throw error;
                     return null;
@@ -375,7 +376,7 @@ export function registerSessionRelease(host: ToolHost, deps: ServerDeps): void {
                         result: 'Released the browser session and stopped the meter.',
                         pageState: finalUrl ? `${finalUrl}${title ? ` — ${title}` : ''}` : undefined,
                         notes: [
-                            ...(record.viewerUrl ? [`Steel dashboard: ${record.viewerUrl}`] : []),
+                            ...(record.viewerUrl ? [`Session dashboard: ${record.viewerUrl}`] : []),
                             ...(record.mitigation.persistProfile
                                 ? [
                                       'Profile persistence was requested; it may remain UPLOADING before it becomes READY.',
@@ -426,7 +427,7 @@ async function newestLiveSession(deps: ServerDeps): Promise<HandleRecord> {
         .sort((left, right) => right.createdAt - left.createdAt);
     const newest = live[0];
     if (!newest) {
-        throw new SteelToolError('There is no live browser session to show. Call steel_session_create to start one.', {
+        throw new SteelToolError('There is no live browser session to show. Call browser_session_create to start one.', {
             code: 'session_expired',
         });
     }
@@ -435,7 +436,7 @@ async function newestLiveSession(deps: ServerDeps): Promise<HandleRecord> {
 
 export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_session_live_view',
+        'browser_session_live_view',
         {
             title: 'Live view connection',
             description: 'App-only viewer and control lease; no page content.',
@@ -455,7 +456,7 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
             _meta: { ui: { visibility: ['app'] } },
         },
         async (args, ctx) =>
-            guard(deps, 'steel_session_live_view', ctx.mcpReq, async () => {
+            guard(deps, 'browser_session_live_view', ctx.mcpReq, async () => {
                 const action = args.action ?? 'connect';
                 if (action !== 'connect') {
                     if (!args.session_id) {
@@ -538,7 +539,7 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                     // which is an org-wide credential and must not leave this process.
                     throw new SteelToolError(
                         'Steel returned no live-view connection for this session, so it cannot be streamed ' +
-                            'inline. Open the session viewer link from steel_session_create instead.',
+                            'inline. Open the session viewer link from browser_session_create instead.',
                         { code: 'steel_error' }
                     );
                 }
@@ -563,23 +564,23 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
 
 const diagnosticsInputSchema = z
     .object({
-        session_id: sessionIdSchema.optional().describe('Live id from steel_session_create.'),
-        steel_session_id: uuidSchema.optional().describe('Finished Steel dashboard UUID.'),
+        session_id: sessionIdSchema.optional().describe('Live id from browser_session_create.'),
+        finished_session_id: uuidSchema.optional().describe('Finished session UUID.'),
         list_live: z.boolean().optional().describe("List this credential's recoverable live session handles."),
         since: z.string().optional().describe('Only events at or after this ISO-8601 time.'),
         max_tokens: maxTokensSchema,
         cursor: cursorSchema,
     })
     .strict()
-    .refine(args => !(args.session_id && args.steel_session_id), {
-        message: 'Pass session_id or steel_session_id, not both.',
-        path: ['steel_session_id'],
+    .refine(args => !(args.session_id && args.finished_session_id), {
+        message: 'Pass session_id or finished_session_id, not both.',
+        path: ['finished_session_id'],
     })
     .refine(
         args =>
             !args.list_live ||
             (!args.session_id &&
-                !args.steel_session_id &&
+                !args.finished_session_id &&
                 !args.since &&
                 !args.cursor &&
                 args.max_tokens === undefined),
@@ -628,16 +629,16 @@ interface DiagnosticsTarget {
 /** Resolves a live handle, a dashboard UUID, or the caller's newest released Steel session. */
 async function resolveDiagnosticsTarget(
     deps: ServerDeps,
-    args: { session_id?: string | undefined; steel_session_id?: string | undefined },
+    args: { session_id?: string | undefined; finished_session_id?: string | undefined },
     signal?: AbortSignal
 ): Promise<DiagnosticsTarget> {
-    if (args.steel_session_id) {
+    if (args.finished_session_id) {
         // Steel authorizes this UUID against the API credential on both diagnostics endpoints. A
         // raw id is never resolved through our live-handle registry because finished records are
         // deliberately absent there.
         return {
-            reference: args.steel_session_id,
-            steelSessionId: args.steel_session_id,
+            reference: args.finished_session_id,
+            steelSessionId: args.finished_session_id,
             kind: 'historical_id',
         };
     }
@@ -649,8 +650,8 @@ async function resolveDiagnosticsTarget(
         } catch (error) {
             if (error instanceof SteelToolError && (error.code === 'not_found' || error.code === 'session_expired')) {
                 throw new SteelToolError(
-                    'That MCP session handle is no longer live. Pass steel_session_id with the session UUID ' +
-                        'shown in the Steel dashboard, or omit both ids to inspect the most recent released session. ' +
+                    'That MCP session handle is no longer live. Pass finished_session_id with the session UUID ' +
+                        'shown in the session dashboard, or omit both ids to inspect the most recent released session. ' +
                         'A replacement browser cannot recover these logs.',
                     { code: error.code }
                 );
@@ -663,7 +664,7 @@ async function resolveDiagnosticsTarget(
     const latest = recent.sessions[0];
     if (!latest) {
         throw new SteelToolError(
-            'No released Steel session was found for this credential. Pass steel_session_id if you meant a ' +
+            'No released browser session was found for this credential. Pass finished_session_id if you meant a ' +
                 'specific finished or failed session. A replacement browser would not recover historical logs.',
             { code: 'not_found' }
         );
@@ -672,7 +673,7 @@ async function resolveDiagnosticsTarget(
         reference: latest.id,
         steelSessionId: latest.id,
         kind: 'latest_released',
-        selectionNote: `Reading the most recent released Steel session: ${latest.id}${
+        selectionNote: `Reading the most recent released browser session: ${latest.id}${
             latest.createdAt ? ` (created ${latest.createdAt})` : ''
         }.`,
     };
@@ -680,7 +681,7 @@ async function resolveDiagnosticsTarget(
 
 export function registerSessionDiagnostics(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_session_diagnostics',
+        'browser_session_diagnostics',
         {
             title: 'Explain what a browser session did',
             description: 'Read live/released activity or list live handles; never starts a browser.',
@@ -688,7 +689,7 @@ export function registerSessionDiagnostics(host: ToolHost, deps: ServerDeps): vo
             inputSchema: diagnosticsInputSchema,
         },
         async (args, ctx) =>
-            guard(deps, 'steel_session_diagnostics', ctx.mcpReq, async () => {
+            guard(deps, 'browser_session_diagnostics', ctx.mcpReq, async () => {
                 if (args.list_live) return liveSessionResult(deps, await deps.registry.list(deps.principal));
                 const target = await resolveDiagnosticsTarget(deps, args, ctx.mcpReq.signal);
                 const [timelineRead, logsRead] = await Promise.allSettled([
@@ -795,7 +796,7 @@ export function registerSessionDiagnostics(host: ToolHost, deps: ServerDeps): vo
                         // server's own prose and is left outside the fence.
                         snapshot: events.length
                             ? fenceUntrusted(page.text, {
-                                  source: `steel-session:${target.reference}`,
+                                  source: `browser-session:${target.reference}`,
                                   fetchedAt: deps.now().toISOString(),
                               })
                             : page.text,
@@ -805,7 +806,7 @@ export function registerSessionDiagnostics(host: ToolHost, deps: ServerDeps): vo
                     {
                         ...(target.kind === 'live_handle'
                             ? { session_id: target.reference }
-                            : { steel_session_id: target.steelSessionId }),
+                            : { finished_session_id: target.steelSessionId }),
                         event_count: events.length,
                         has_more: (timeline.hasMore ?? false) || (logs.hasMore ?? false),
                         hidden_log_count: hiddenLogCount,

@@ -21,8 +21,8 @@ stdio_output="$(
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     | docker run -i --rm -e STEEL_API_KEY=smoke-not-a-real-key "$IMAGE" 2>/dev/null
 )"
-if ! grep -q '"steel_scrape"' <<<"$stdio_output"; then
-  echo 'stdio entrypoint did not list steel_scrape' >&2
+if ! grep -q '"browser_scrape"' <<<"$stdio_output"; then
+  echo 'stdio entrypoint did not list browser_scrape' >&2
   exit 1
 fi
 echo 'stdio entrypoint lists its tools'

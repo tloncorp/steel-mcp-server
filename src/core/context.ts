@@ -163,7 +163,7 @@ export class CdpSessionPool implements SessionPool {
 
         throw new SteelToolError(
             'The browser connection for this session keeps dropping. Release the session with ' +
-                'steel_session_release and create a new one.',
+                'browser_session_release and create a new one.',
             { code: 'session_expired', details: { steelSessionId } }
         );
     }

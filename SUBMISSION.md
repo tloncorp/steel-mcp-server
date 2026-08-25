@@ -22,7 +22,7 @@ Recorded so review prep does not re-litigate it.
 |---|---|
 | Public GitHub repo, MIT licensed | `steel-dev/steel-mcp-server`, MIT |
 | Built with Node.js | Node ≥20, ESM |
-| Tool names ≤64 chars (policy 5C) | Longest is `steel_session_diagnostics`, 25 |
+| Tool names ≤64 chars (policy 5C) | Longest is `browser_session_diagnostics`, 25 |
 | `title` + `readOnlyHint`/`destructiveHint` on every tool (5E) | All 14, enforced by `tests/integration/tools.test.ts:92` |
 | Graceful, specific errors (5A) | Named errors with recovery actions; RESEARCH.md §7 |
 | Token frugality (5B) | `npm run budget` gate, screenshots cap inline PNGs at 4 MiB and retain attachment links, post-action snapshots off by default |
@@ -43,8 +43,8 @@ Policy 2B requires descriptions to match actual functionality, and a reviewer re
 
 - ~~README documented `vision` and `full` as aliases of `browse`~~ — both are now refused rather
   than aliased (`PROFILE_NAMES` is `scrape`, `browse`), and the README documents only those two.
-- ~~README said "twelve tools"~~ — it says fifteen and lists replay, `steel_session_handoff`, and
-  `steel_session_live_view`, noting that hosts hide the latter via
+- ~~README said "twelve tools"~~ — it says fifteen and lists replay, `browser_session_handoff`, and
+  `browser_session_live_view`, noting that hosts hide the latter via
   `_meta.ui.visibility: ['app']`. A test now asserts the README mentions every entry in `TOOL_TABLE`.
 - ~~`repository.url` and `bugs` pointed at `steel-dev/mcp-server` and 404ed~~ — both now name
   `steel-dev/steel-mcp-server`, asserted against the real remote.
@@ -155,7 +155,7 @@ Steel's behalf:
 `build/steel-mcp-2.0.0-rc.2.mcpb`. Its staged server is verified over JSON-RPC and lists 15 tools, but
 that proves it starts, not that a real Steel key drives a real browser through Desktop's own Node.
 Install it, fully restart Claude, and open a new conversation. Confirm the installed server reports
-`2.0.0-rc.2`, lists 15 tools including `steel_session_handoff`, and defaults to a 15-minute session.
+`2.0.0-rc.2`, lists 15 tools including `browser_session_handoff`, and defaults to a 15-minute session.
 Run each tool, confirm the live viewer renders, and exercise Take control → Hand back → Continue on
 the same session. Finished-session replay is dashboard-only in this release candidate, so verify
 that its safe dashboard link opens and that no replay app resource is registered or bundled.

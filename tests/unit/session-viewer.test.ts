@@ -821,7 +821,7 @@ describe('SESSION_VIEWER_HTML', () => {
     it('is a complete standalone document served as an MCP app', () => {
         expect(SESSION_VIEWER_HTML.startsWith('<!doctype html>')).toBe(true);
         expect(SESSION_VIEWER_HTML).toContain('</html>');
-        expect(SESSION_VIEWER_URI).toBe('ui://steel/session-viewer');
+        expect(SESSION_VIEWER_URI).toBe('ui://browser/session-viewer');
         expect(SESSION_VIEWER_MIME_TYPE).toBe('text/html;profile=mcp-app');
     });
 
@@ -865,7 +865,7 @@ describe('SESSION_VIEWER_HTML', () => {
 
     it('asks the live-view tool for the connection details by name', () => {
         expect(inlineScript).toContain(SESSION_VIEWER_LIVE_VIEW_TOOL);
-        expect(SESSION_VIEWER_LIVE_VIEW_TOOL).toBe('steel_session_live_view');
+        expect(SESSION_VIEWER_LIVE_VIEW_TOOL).toBe('browser_session_live_view');
     });
 
     it('drives the screencast attach flow and acks every frame', () => {

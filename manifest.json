@@ -52,67 +52,67 @@
     "tools_generated": false,
     "tools": [
         {
-            "name": "steel_scrape",
+            "name": "browser_scrape",
             "description": "Read a web page as markdown or HTML. Starts no browser session."
         },
         {
-            "name": "steel_screenshot",
+            "name": "browser_screenshot",
             "description": "Capture a screenshot, embed a bounded PNG preview when possible, and retain its attachment download link."
         },
         {
-            "name": "steel_pdf",
+            "name": "browser_pdf",
             "description": "Render a page to PDF and return a link to it."
         },
         {
-            "name": "steel_session_create",
+            "name": "browser_session_create",
             "description": "Start a browser session that can be interacted with, and show it inline where the host supports it."
         },
         {
-            "name": "steel_session_release",
+            "name": "browser_session_release",
             "description": "Shut a browser session down and stop the meter."
         },
         {
-            "name": "steel_navigate",
+            "name": "browser_navigate",
             "description": "Point an open browser session at a URL."
         },
         {
-            "name": "steel_snapshot",
+            "name": "browser_snapshot",
             "description": "Read the current page as an accessibility tree with references that can be acted on."
         },
         {
-            "name": "steel_find",
+            "name": "browser_find",
             "description": "Locate one element on the current page without reading the whole page."
         },
         {
-            "name": "steel_act",
+            "name": "browser_act",
             "description": "Click, type, fill a form, select, hover, scroll, press a key, go back, or dismiss an overlay."
         },
         {
-            "name": "steel_wait_for",
+            "name": "browser_wait_for",
             "description": "Wait for named text, a selector, or a URL before continuing."
         },
         {
-            "name": "steel_session_diagnostics",
+            "name": "browser_session_diagnostics",
             "description": "Read timestamped activity from a live or finished browser session without starting a new one."
         },
         {
-            "name": "steel_session_handoff",
+            "name": "browser_session_handoff",
             "description": "Pause while a person takes exclusive control of the same live browser, then resume after hand-back."
         },
         {
-            "name": "steel_session_replay",
-            "description": "On an explicit watch or replay request, return a finished session's safe Steel dashboard link without starting a browser."
+            "name": "browser_session_replay",
+            "description": "On an explicit watch or replay request, return a finished session's safe dashboard link without starting a browser."
         },
         {
-            "name": "steel_batch",
+            "name": "browser_batch",
             "description": "Run known reversible steps in one call; hand off before login, payment or final confirmation."
         },
         {
-            "name": "steel_session_options",
+            "name": "browser_session_options",
             "description": "Plan setup and discover safe profile/login metadata before creating a session."
         },
         {
-            "name": "steel_session_live_view",
+            "name": "browser_session_live_view",
             "description": "Return the connection details the inline session viewer needs. Returns no page content, and hosts hide it from the model."
         }
     ],

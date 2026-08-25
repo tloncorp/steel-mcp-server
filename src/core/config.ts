@@ -124,7 +124,7 @@ export function loadConfig(env: Record<string, string | undefined>): SteelConfig
     if (env.GLOBAL_WAIT_SECONDS !== undefined) {
         warnings.push(
             'GLOBAL_WAIT_SECONDS is no longer used. Every action waits for the page to settle by ' +
-                'itself; when something genuinely arrives later, call steel_wait_for and name what ' +
+                'itself; when something genuinely arrives later, call browser_wait_for and name what ' +
                 'you are waiting for.'
         );
     }
@@ -148,7 +148,7 @@ export function loadConfig(env: Record<string, string | undefined>): SteelConfig
         connectUrl: env.STEEL_CONNECT_URL ?? (deployment === 'cloud' ? CLOUD_CONNECT_URL : toWebSocketUrl(baseUrl)),
         deployment,
         profile: profileName as ProfileName,
-        maxConcurrentSessions: deployment === 'self_hosted' ? 1 : parseIntEnv(env.STEEL_MAX_SESSIONS, 10),
+        maxConcurrentSessions: parseIntEnv(env.STEEL_MAX_SESSIONS, deployment === 'self_hosted' ? 1 : 10),
         inactivityTimeoutMs: parseIntEnv(env.STEEL_INACTIVITY_TIMEOUT_MS, DEFAULT_INACTIVITY_TIMEOUT_MS),
         sessionTimeoutMs: parseIntEnv(env.STEEL_SESSION_TIMEOUT_MS, DEFAULT_SESSION_TIMEOUT_MS),
         requestStateSecret: resolveRequestStateSecret(env.STEEL_REQUEST_STATE_SECRET),

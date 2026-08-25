@@ -141,7 +141,7 @@ describe.skipIf(!available)('the session viewer in a real browser', () => {
             expect(log.messages[0]!.params).toMatchObject({
                 protocolVersion: '2026-01-26',
                 appCapabilities: {},
-                appInfo: { name: 'steel-session-viewer' },
+                appInfo: { name: 'browser-session-viewer' },
             });
             expect(log.ready).toBe(true);
             expect(cdp.connectionCount).toBe(1);

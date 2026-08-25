@@ -558,7 +558,7 @@ export class PageState {
         const record = this.recordByRef.get(ref);
         if (!record) {
             throw new SteelToolError(
-                `${ref} is not a reference this page has issued. Call steel_snapshot or steel_find to get current refs.`,
+                `${ref} is not a reference this page has issued. Call browser_snapshot or browser_find to get current refs.`,
                 { code: 'ref_not_found', details: { ref } }
             );
         }

@@ -75,7 +75,7 @@ control speculatively.
   the bounded click errors. Clearing before dispatch/settle is premature.
 
 - `src/core/errors.ts:474-508` tells the caller to reacquire and retry once, then change
-  strategy or call `steel_session_handoff`. The repeated flag is exact-node state; the
+  strategy or call `browser_session_handoff`. The repeated flag is exact-node state; the
   error builder has no document-level context.
 
 - `tests/unit/page.test.ts` covers transformed quads, an inset success, a full cover,
@@ -166,7 +166,7 @@ In `tests/unit/page.test.ts`, characterize:
 1. The first two distinct but related sibling/wrapper failures receive bounded recovery
    guidance.
 2. The third failure in that same deterministic episode gets stronger guidance to stop
-   trying variants, change path or use `steel_session_handoff`.
+   trying variants, change path or use `browser_session_handoff`.
 3. A successful dispatched-and-settled click/check and successful type/fill/select reset
    the episode, but merely finding a reachable point does not: inject mouse-dispatch and
    settle failures to prove both.
@@ -184,7 +184,7 @@ on the exact same node.
 
 In `tests/unit/errors.test.ts`, characterize the episode-exhausted error separately from
 the exact-node repeated error. It must say no further click variant should be tried and
-offer another path or `steel_session_handoff`; it must not imply login, CAPTCHA, payment
+offer another path or `browser_session_handoff`; it must not imply login, CAPTCHA, payment
 or final confirmation was detected.
 
 **STOP gate**: if the sibling/wrapper fixture cannot reproduce the loop deterministically,

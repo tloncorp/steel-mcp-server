@@ -1,4 +1,4 @@
-// ABOUTME: steel_batch runs known browser steps in one call and stops at failures or human boundaries.
+// ABOUTME: browser_batch runs known browser steps in one call and stops at failures or human boundaries.
 // ABOUTME: It returns at most one snapshot at the end and never replays completed mutations.
 import { z } from 'zod';
 import type { ServerDeps, ToolHost } from '../context.js';
@@ -8,7 +8,7 @@ import { ACTIONS } from '../page.js';
 import { snapshotSection } from './browse.js';
 import { maxTokensSchema, sessionIdSchema, successResult, withPage } from './shared.js';
 
-const STEP_TOOLS = ['steel_navigate', 'steel_act', 'steel_wait_for'] as const;
+const STEP_TOOLS = ['browser_navigate', 'browser_act', 'browser_wait_for'] as const;
 
 const stepSchema = z
     .object({
@@ -33,34 +33,34 @@ const stepSchema = z
             key => step.arguments[key as keyof typeof step.arguments] !== undefined
         );
         const allowed =
-            step.tool === 'steel_navigate'
+            step.tool === 'browser_navigate'
                 ? new Set(['url'])
-                : step.tool === 'steel_act'
+                : step.tool === 'browser_act'
                   ? new Set(['action', 'target', 'value', 'fields'])
                   : new Set(['text', 'selector', 'url', 'timeout_ms']);
         const unexpected = keys.filter(key => !allowed.has(key));
         if (unexpected.length) {
             ctx.addIssue({ code: 'custom', message: `${step.tool} does not accept: ${unexpected.join(', ')}` });
         }
-        if (step.tool === 'steel_navigate' && !step.arguments.url) {
-            ctx.addIssue({ code: 'custom', message: 'steel_navigate requires url' });
+        if (step.tool === 'browser_navigate' && !step.arguments.url) {
+            ctx.addIssue({ code: 'custom', message: 'browser_navigate requires url' });
         }
-        if (step.tool === 'steel_act' && !step.arguments.action) {
-            ctx.addIssue({ code: 'custom', message: 'steel_act requires action' });
+        if (step.tool === 'browser_act' && !step.arguments.action) {
+            ctx.addIssue({ code: 'custom', message: 'browser_act requires action' });
         }
         if (
-            step.tool === 'steel_wait_for' &&
+            step.tool === 'browser_wait_for' &&
             step.arguments.text === undefined &&
             step.arguments.selector === undefined &&
             step.arguments.url === undefined
         ) {
-            ctx.addIssue({ code: 'custom', message: 'steel_wait_for requires text, selector or url' });
+            ctx.addIssue({ code: 'custom', message: 'browser_wait_for requires text, selector or url' });
         }
     });
 
 export function registerBatch(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_batch',
+        'browser_batch',
         {
             title: 'Run several browser steps at once',
             description:
@@ -80,7 +80,7 @@ export function registerBatch(host: ToolHost, deps: ServerDeps): void {
                 .strict(),
         },
         async (args, ctx) =>
-            withPage(deps, 'steel_batch', ctx.mcpReq, args.session_id, async (page, record) => {
+            withPage(deps, 'browser_batch', ctx.mcpReq, args.session_id, async (page, record) => {
                 const lines: string[] = [];
                 let lastChange = 'No step reported a change.';
 
@@ -101,9 +101,9 @@ export function registerBatch(host: ToolHost, deps: ServerDeps): void {
                     const label = `Step ${index + 1} (${step.tool})`;
                     let completed = false;
                     try {
-                        if (step.tool === 'steel_navigate') {
+                        if (step.tool === 'browser_navigate') {
                             if (!step.arguments.url) {
-                                throw new SteelToolError('A steel_navigate step needs a url.', {
+                                throw new SteelToolError('A browser_navigate step needs a url.', {
                                     code: 'invalid_argument',
                                 });
                             }
@@ -111,9 +111,9 @@ export function registerBatch(host: ToolHost, deps: ServerDeps): void {
                             lines.push(`${label}: opened ${outcome.finalUrl}. ${outcome.changeDescription}`);
                             lastChange = outcome.changeDescription;
                             completed = true;
-                        } else if (step.tool === 'steel_act') {
+                        } else if (step.tool === 'browser_act') {
                             if (!step.arguments.action) {
-                                throw new SteelToolError('A steel_act step needs an action.', {
+                                throw new SteelToolError('A browser_act step needs an action.', {
                                     code: 'invalid_argument',
                                 });
                             }
@@ -161,7 +161,7 @@ export function registerBatch(host: ToolHost, deps: ServerDeps): void {
                     }
                     if (completed) {
                         await deps.registry.touch(args.session_id);
-                        if (step.tool === 'steel_navigate' || step.tool === 'steel_act') {
+                        if (step.tool === 'browser_navigate' || step.tool === 'browser_act') {
                             await stopAtBoundary(index + 1);
                         }
                     }

@@ -29,7 +29,7 @@
 ## Why this matters
 
 Claude Desktop stopped both long Amazon turns after exactly 50 model-issued tools.
-`steel_batch` can replace several deterministic calls with one, but the current handler
+`browser_batch` can replace several deterministic calls with one, but the current handler
 directly invokes page operations and never runs the login/CAPTCHA classifier used by
 the equivalent individual tools. Promoting it as a tool-budget solution today can run
 later steps after a detected login/CAPTCHA boundary.
@@ -37,15 +37,15 @@ later steps after a detected login/CAPTCHA boundary.
 The safe outcome is a short, read-independent batch that stops at its first failure or
 a **detected clearable login/CAPTCHA boundary**, reports exactly what completed, and
 never replays mutations. It should direct the model to call explicit
-`steel_session_handoff` on the same session, then start a new batch containing only the
+`browser_session_handoff` on the same session, then start a new batch containing only the
 unrun steps. Payment and final-confirmation avoidance remains a model/tool-contract
 rule; this plan does not pretend the structural classifier can recognize every checkout
 boundary.
 
 ## Current state
 
-- `src/core/tools/batch.ts:10-25` permits `steel_navigate`, `steel_act` and
-  `steel_wait_for`; its nested `timeout_ms` is positive but has no maximum.
+- `src/core/tools/batch.ts:10-25` permits `browser_navigate`, `browser_act` and
+  `browser_wait_for`; its nested `timeout_ms` is positive but has no maximum.
 
 - `src/core/tools/batch.ts:50-100` loops through up to 20 steps, calls the page methods
   directly, and stops only when one throws:
@@ -67,7 +67,7 @@ boundary.
   re-enter at step one and could add the same cart item twice.
 
 - `src/core/instructions.ts:16` and the current batch tool description already
-  positively recommend `steel_batch` for known reversible checkout steps. This plan
+  positively recommend `browser_batch` for known reversible checkout steps. This plan
   makes that advertised path safe; Plan 005 only refines and dogfoods the guidance.
 
 - `tests/integration/mrtr.test.ts:492-548` covers automatic handoff for individual
@@ -108,7 +108,7 @@ boundary.
 
 **Out of scope**:
 
-- Automatically completing an elicitation inside `steel_batch`.
+- Automatically completing an elicitation inside `browser_batch`.
 - Persisting batch progress in unsigned client input or replaying completed steps after
   handoff.
 - Blindly batching dynamic checkout controls whose refs are not known yet.
@@ -158,7 +158,7 @@ In `tests/integration/mrtr.test.ts`, add modern-client cases for:
    counts as completed: for step 1 of 2, assert `completed_steps=1`, `next_step=2`, and
    `remaining_steps=1`. The sentinel second action is skipped, no elicitation starts,
    and the typed error names the same public handle conceptually (never the Steel UUID)
-   plus `steel_session_handoff`.
+   plus `browser_session_handoff`.
 2. A successful batch action raises an operable CAPTCHA. Use the same post-success
    accounting. When this is the final step, assert `next_step=null` and
    `remaining_steps=0`; handoff is still required even though no batch step remains.
@@ -171,7 +171,7 @@ In `tests/integration/mrtr.test.ts`, add modern-client cases for:
    handoff as though a person could clear it. Because it is also detected after a
    successful navigate/act, assert the same exact `completed_steps`, `next_step`,
    `remaining_steps` and “do not rerun completed steps” accounting.
-5. Calling explicit `steel_session_handoff` after a clearable-boundary error preserves the same
+5. Calling explicit `browser_session_handoff` after a clearable-boundary error preserves the same
    handle/page state, and a new batch containing only the unrun sentinel step succeeds.
 6. Exactly one Steel session was created throughout. Count the fake page action or
    `Input.dispatchMouseEvent` calls and assert the completed cart mutation remains
@@ -187,8 +187,8 @@ retailer data.
 
 ### Step 3: Stop a batch at a detected clearable boundary
 
-In `src/core/tools/batch.ts`, inspect after each successful `steel_navigate` and
-`steel_act`. For `steel_wait_for`, inspect only when the wait throws the same typed
+In `src/core/tools/batch.ts`, inspect after each successful `browser_navigate` and
+`browser_act`. For `browser_wait_for`, inspect only when the wait throws the same typed
 timeout the individual handler inspects. Match individual-tool behavior rather than
 classifying every successful wait unnecessarily.
 
@@ -203,7 +203,7 @@ login/CAPTCHA boundary is found:
   `completed_steps`, `next_step`, `remaining_steps`, and
   `handoff_required: true`;
 - say explicitly not to rerun completed steps, to call
-  `steel_session_handoff` with the same public session handle, and then to submit only
+  `browser_session_handoff` with the same public session handle, and then to submit only
   the unrun steps in a new batch.
 
 For a recognized but non-clearable block, keep the existing mitigation-ladder error,
@@ -220,7 +220,7 @@ existing final-page URL behavior.
 ### Step 4: Bound execution after caller cancellation and keep the handle fresh
 
 Give a batch-nested wait the same explicit `.max(120_000)` validation as standalone
-`steel_wait_for`; this closes an inconsistent schema but does not claim the Amazon run
+`browser_wait_for`; this closes an inconsistent schema but does not claim the Amazon run
 had an MCP call timeout. Between steps:
 
 - check `ctx.mcpReq.signal.aborted` and stop before the next step;
@@ -290,7 +290,7 @@ not as a claimed classifier capability.
 
 ## Done criteria
 
-- [ ] `steel_batch` cannot continue past a detected login/CAPTCHA boundary.
+- [ ] `browser_batch` cannot continue past a detected login/CAPTCHA boundary.
 - [ ] A boundary never auto-elicits or replays completed batch mutations.
 - [ ] Clearable boundaries identify completed/unrun work and direct explicit same-session
       handoff; non-clearable blocks retain mitigation without false handoff guidance.
@@ -307,7 +307,7 @@ not as a claimed classifier capability.
 
 Stop and report back if:
 
-- Correct MRTR behavior appears to require retrying `steel_batch` from step one.
+- Correct MRTR behavior appears to require retrying `browser_batch` from step one.
 - Progress would need unsigned client state, page evidence, debug/player URLs or
   selectors in request state/details. Preserving the existing final-page URL alone is
   not a scope expansion.

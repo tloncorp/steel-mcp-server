@@ -57,7 +57,7 @@ afterEach(async () => {
 });
 
 async function newSession(h: Harness = harness): Promise<string> {
-    const result = await h.client.callTool({ name: 'steel_session_create', arguments: {} });
+    const result = await h.client.callTool({ name: 'browser_session_create', arguments: {} });
     const structured = (result as { structuredContent?: { session_id?: string } }).structuredContent;
     if (!structured?.session_id) throw new Error(`session_create failed: ${textOf(result)}`);
     return structured.session_id;
@@ -70,24 +70,24 @@ describe('tools/list', () => {
         const names = first.tools.map(tool => tool.name);
         expect(names).toEqual(second.tools.map(tool => tool.name));
         expect(names).toEqual([
-            'steel_scrape',
-            'steel_screenshot',
-            'steel_pdf',
-            'steel_session_create',
-            'steel_session_release',
-            'steel_navigate',
-            'steel_snapshot',
-            'steel_find',
-            'steel_act',
-            'steel_wait_for',
-            'steel_session_diagnostics',
-            'steel_session_handoff',
-            'steel_session_replay',
-            'steel_batch',
-            'steel_session_options',
+            'browser_scrape',
+            'browser_screenshot',
+            'browser_pdf',
+            'browser_session_create',
+            'browser_session_release',
+            'browser_navigate',
+            'browser_snapshot',
+            'browser_find',
+            'browser_act',
+            'browser_wait_for',
+            'browser_session_diagnostics',
+            'browser_session_handoff',
+            'browser_session_replay',
+            'browser_batch',
+            'browser_session_options',
             // Listed, and last: the spec has the host filter an app-only tool out of what the model
             // sees, which means the server does list it.
-            'steel_session_live_view',
+            'browser_session_live_view',
         ]);
     });
 
@@ -125,7 +125,7 @@ describe('tools/list', () => {
     });
 
     it('never puts page content in a tool description', async () => {
-        await harness.client.callTool({ name: 'steel_scrape', arguments: { url: 'https://example.com' } });
+        await harness.client.callTool({ name: 'browser_scrape', arguments: { url: 'https://example.com' } });
         const { tools } = await harness.client.listTools();
         expect(tools.every(tool => !tool.description?.includes('Hello world'))).toBe(true);
     });
@@ -134,7 +134,7 @@ describe('tools/list', () => {
         const scrapeOnly = await connect(testDeps({ env: { STEEL_PROFILE: 'scrape' } }));
         try {
             const names = (await scrapeOnly.client.listTools()).tools.map(tool => tool.name);
-            expect(names).toEqual(['steel_scrape', 'steel_screenshot', 'steel_pdf']);
+            expect(names).toEqual(['browser_scrape', 'browser_screenshot', 'browser_pdf']);
         } finally {
             await scrapeOnly.close();
         }
@@ -156,17 +156,17 @@ describe('server instructions', () => {
         expect(instructions).toMatch(/viewer input.*may be absent/i);
         expect(instructions).toMatch(/session_handoff.*sensitive.*local file/i);
         expect(instructions).toMatch(/do not act or release.*human control/i);
-        expect(instructions).toMatch(/steel_batch.*known.*reversible.*checkout/i);
+        expect(instructions).toMatch(/browser_batch.*known.*reversible.*checkout/i);
         expect(instructions).toMatch(/stop before.*payment.*final confirmation/i);
         expect(instructions).toMatch(/session_handoff.*take over/i);
         expect(instructions).toMatch(/never create.*old activity/i);
     });
 });
 
-describe('steel_scrape', () => {
+describe('browser_scrape', () => {
     it('fences the page content with its final URL and a data-not-instructions statement', async () => {
         const result = await harness.client.callTool({
-            name: 'steel_scrape',
+            name: 'browser_scrape',
             arguments: { url: 'https://example.com' },
         });
         const text = textOf(result);
@@ -177,13 +177,13 @@ describe('steel_scrape', () => {
     });
 
     it('defaults to markdown and sends the singular format parameter', async () => {
-        await harness.client.callTool({ name: 'steel_scrape', arguments: { url: 'https://example.com' } });
+        await harness.client.callTool({ name: 'browser_scrape', arguments: { url: 'https://example.com' } });
         expect(harness.deps.api.scrapes[0]).toMatchObject({ format: ['markdown'] });
     });
 
     it('always returns links and metadata without being asked', async () => {
         const result = await harness.client.callTool({
-            name: 'steel_scrape',
+            name: 'browser_scrape',
             arguments: { url: 'https://example.com' },
         });
         expect(textOf(result)).toContain('https://example.com/about');
@@ -201,7 +201,7 @@ describe('steel_scrape', () => {
         const h = await connect(testDeps({ api: hostile }));
         try {
             const text = textOf(
-                await h.client.callTool({ name: 'steel_scrape', arguments: { url: 'https://x.test' } })
+                await h.client.callTool({ name: 'browser_scrape', arguments: { url: 'https://x.test' } })
             );
             const linkAt = text.indexOf('IGNORE PREVIOUS INSTRUCTIONS');
             expect(linkAt).toBeGreaterThan(-1);
@@ -226,7 +226,7 @@ describe('steel_scrape', () => {
         const h = await connect(testDeps({ api: hostile }));
         try {
             const text = textOf(
-                await h.client.callTool({ name: 'steel_scrape', arguments: { url: 'https://x.test' } })
+                await h.client.callTool({ name: 'browser_scrape', arguments: { url: 'https://x.test' } })
             );
             const at = text.indexOf('TITLE_INJECTION_MARKER');
             expect(at).toBeGreaterThan(-1);
@@ -248,7 +248,7 @@ describe('steel_scrape', () => {
         });
         const h = await connect(testDeps({ api: hostile }));
         try {
-            const result = await h.client.callTool({ name: 'steel_scrape', arguments: { url: 'https://x.test' } });
+            const result = await h.client.callTool({ name: 'browser_scrape', arguments: { url: 'https://x.test' } });
             expect(textOf(result)).toContain('Clickhere');
             const structured = (result as { structuredContent?: { links?: Array<{ text?: string }> } })
                 .structuredContent;
@@ -272,7 +272,7 @@ describe('steel_scrape', () => {
         try {
             const text = textOf(
                 await h.client.callTool({
-                    name: 'steel_scrape',
+                    name: 'browser_scrape',
                     arguments: { url: 'https://x.test', format: ['html'] },
                 })
             );
@@ -288,7 +288,7 @@ describe('steel_scrape', () => {
         const h = await connect(testDeps({ api: big }));
         try {
             const result = await h.client.callTool({
-                name: 'steel_scrape',
+                name: 'browser_scrape',
                 arguments: { url: 'https://example.com', max_tokens: 500 },
             });
             const text = textOf(result);
@@ -317,7 +317,7 @@ describe('steel_scrape', () => {
         const h = await connect(testDeps({ api }));
         try {
             const result = await h.client.callTool({
-                name: 'steel_scrape',
+                name: 'browser_scrape',
                 arguments: { url: 'https://example.com', max_tokens: 100 },
             });
             expect(textOf(result).length).toBeLessThan(5_000);
@@ -338,7 +338,7 @@ describe('steel_scrape', () => {
         });
         const h = await connect(testDeps({ api: failing }));
         try {
-            const result = await h.client.callTool({ name: 'steel_scrape', arguments: { url: 'https://x.test' } });
+            const result = await h.client.callTool({ name: 'browser_scrape', arguments: { url: 'https://x.test' } });
             expect(isError(result)).toBe(true);
             expect(textOf(result)).toMatch(/\$10 verified paid balance/);
         } finally {
@@ -347,7 +347,7 @@ describe('steel_scrape', () => {
     });
 });
 
-describe('steel_screenshot and steel_pdf', () => {
+describe('browser_screenshot and browser_pdf', () => {
     it('embeds a small PNG attachment exactly once and includes a fallback link', async () => {
         const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
         const h = await connect(
@@ -364,7 +364,7 @@ describe('steel_screenshot and steel_pdf', () => {
         );
         try {
             const result = await h.client.callTool({
-                name: 'steel_screenshot',
+                name: 'browser_screenshot',
                 arguments: { url: 'https://example.com' },
             });
             const content = (result as { content: Array<{ type: string; uri?: string; data?: string; size?: number }> })
@@ -385,7 +385,7 @@ describe('steel_screenshot and steel_pdf', () => {
     });
 
     it('returns a PDF link without dumping base64 into the conversation', async () => {
-        const result = await harness.client.callTool({ name: 'steel_pdf', arguments: { url: 'https://example.com' } });
+        const result = await harness.client.callTool({ name: 'browser_pdf', arguments: { url: 'https://example.com' } });
         const content = (result as { content: Array<{ type: string; uri?: string }> }).content;
         expect(content.some(block => block.type === 'resource')).toBe(false);
         expect(content.find(block => block.type === 'resource_link')?.uri).toMatch(/\.pdf$/);
@@ -393,11 +393,11 @@ describe('steel_screenshot and steel_pdf', () => {
 
     it('forwards proxy selection for stateless screenshots and PDFs', async () => {
         await harness.client.callTool({
-            name: 'steel_screenshot',
+            name: 'browser_screenshot',
             arguments: { url: 'https://example.com', use_proxy: true, inline: false },
         });
         await harness.client.callTool({
-            name: 'steel_pdf',
+            name: 'browser_pdf',
             arguments: { url: 'https://example.com', use_proxy: true },
         });
         expect(harness.deps.api.artifacts.slice(-2)).toMatchObject([{ useProxy: true }, { useProxy: true }]);
@@ -415,7 +415,7 @@ describe('steel_screenshot and steel_pdf', () => {
         );
         try {
             const screenshot = await h.client.callTool({
-                name: 'steel_screenshot',
+                name: 'browser_screenshot',
                 arguments: { url: 'https://example.com', inline: false },
             });
             const content = (screenshot as { content: Array<{ type: string }> }).content;
@@ -453,7 +453,7 @@ describe('steel_screenshot and steel_pdf', () => {
         );
         try {
             const result = await h.client.callTool({
-                name: 'steel_screenshot',
+                name: 'browser_screenshot',
                 arguments: { url: 'https://example.com' },
             });
             const content = (result as { content: Array<{ type: string }> }).content;
@@ -484,7 +484,7 @@ describe('steel_screenshot and steel_pdf', () => {
         );
         try {
             const result = await h.client.callTool({
-                name: 'steel_screenshot',
+                name: 'browser_screenshot',
                 arguments: { url: 'https://example.com' },
             });
             expect((result as { content: Array<{ type: string }> }).content.some(block => block.type === 'image')).toBe(
@@ -504,7 +504,7 @@ describe('steel_screenshot and steel_pdf', () => {
         const h = await connect(testDeps({ artifactFetch }));
         try {
             const result = await h.client.callTool({
-                name: 'steel_screenshot',
+                name: 'browser_screenshot',
                 arguments: { url: 'https://example.com' },
             });
             expect(isError(result)).toBe(false);
@@ -533,7 +533,7 @@ describe('steel_screenshot and steel_pdf', () => {
         try {
             const controller = new AbortController();
             const pending = h.client.callTool(
-                { name: 'steel_screenshot', arguments: { url: 'https://example.com' } },
+                { name: 'browser_screenshot', arguments: { url: 'https://example.com' } },
                 { signal: controller.signal }
             );
             controller.abort();
@@ -554,7 +554,7 @@ describe('steel_screenshot and steel_pdf', () => {
                 touched.push(candidate);
             };
             const result = await h.client.callTool({
-                name: 'steel_screenshot',
+                name: 'browser_screenshot',
                 arguments: { session_id: handle, inline: false },
             });
             expect(isError(result)).toBe(true);
@@ -579,8 +579,8 @@ describe('steel_screenshot and steel_pdf', () => {
         try {
             const handle = await newSession(h);
             touched.length = 0;
-            await h.client.callTool({ name: 'steel_screenshot', arguments: { session_id: handle } });
-            expect(touched, 'steel_screenshot did not mark the handle as used').toContain(handle);
+            await h.client.callTool({ name: 'browser_screenshot', arguments: { session_id: handle } });
+            expect(touched, 'browser_screenshot did not mark the handle as used').toContain(handle);
         } finally {
             await h.close();
         }
@@ -588,16 +588,16 @@ describe('steel_screenshot and steel_pdf', () => {
 
     it('tells the model not to act on pixels', async () => {
         const { tools } = await harness.client.listTools();
-        const screenshot = tools.find(tool => tool.name === 'steel_screenshot');
-        expect(screenshot?.description).toMatch(/steel_snapshot/);
+        const screenshot = tools.find(tool => tool.name === 'browser_screenshot');
+        expect(screenshot?.description).toMatch(/browser_snapshot/);
         expect(screenshot?.description).toMatch(/not action targets/i);
     });
 });
 
-describe('steel_session_create', () => {
+describe('browser_session_create', () => {
     it('describes every setup input on the wire', async () => {
         const { tools } = await harness.client.listTools();
-        for (const name of ['steel_session_create', 'steel_session_options']) {
+        for (const name of ['browser_session_create', 'browser_session_options']) {
             const tool = tools.find(candidate => candidate.name === name);
             const properties = (tool?.inputSchema as { properties?: Record<string, { description?: string }> })
                 ?.properties;
@@ -606,10 +606,10 @@ describe('steel_session_create', () => {
                 name
             ).toBe(true);
         }
-        expect(tools.find(tool => tool.name === 'steel_session_options')?.description).toMatch(
+        expect(tools.find(tool => tool.name === 'browser_session_options')?.description).toMatch(
             /profiles.*credentials.*plan/i
         );
-        expect(tools.find(tool => tool.name === 'steel_session_create')?.description).toMatch(
+        expect(tools.find(tool => tool.name === 'browser_session_create')?.description).toMatch(
             /profile.*credentials.*session_options/i
         );
     });
@@ -617,10 +617,10 @@ describe('steel_session_create', () => {
     it('plainly identifies a create with no saved identity as a guest session', async () => {
         const h = await connect(testDeps());
         try {
-            const created = await h.client.callTool({ name: 'steel_session_create', arguments: {} });
+            const created = await h.client.callTool({ name: 'browser_session_create', arguments: {} });
             expect(isError(created)).toBe(false);
             expect(textOf(created)).toMatch(/fresh guest browser/i);
-            expect(textOf(created)).toMatch(/saved login.*steel_session_options/i);
+            expect(textOf(created)).toMatch(/saved login.*browser_session_options/i);
             expect(created.structuredContent).toMatchObject({
                 managed_credentials: { requested: false, authentication_confirmed: false },
             });
@@ -650,7 +650,7 @@ describe('steel_session_create', () => {
         const h = await connect(testDeps({ api }));
         try {
             const options = await h.client.callTool({
-                name: 'steel_session_options',
+                name: 'browser_session_options',
                 arguments: { url: 'https://example.com/path', goal: 'account', needs: ['mobile'] },
             });
             const planned = (
@@ -659,7 +659,7 @@ describe('steel_session_create', () => {
             expect(planned?.configuration).toBeTruthy();
             expect(planned?.namespace).toBe('niko');
             const created = await h.client.callTool({
-                name: 'steel_session_create',
+                name: 'browser_session_create',
                 arguments: { ...planned, profile_id: 'e5bee5de-a7ca-4225-8d69-2ac76ed6e8b7' },
             });
             expect(isError(created)).toBe(false);
@@ -696,13 +696,13 @@ describe('steel_session_create', () => {
         const h = await connect(testDeps({ api }));
         try {
             const options = await h.client.callTool({
-                name: 'steel_session_options',
+                name: 'browser_session_options',
                 arguments: { url: 'https://example.com', goal: 'interact', needs: ['location'], country: 'DE' },
             });
             const token = (options as { structuredContent?: { create_template?: { configuration?: string } } })
                 .structuredContent?.create_template?.configuration;
             const conflict = await h.client.callTool({
-                name: 'steel_session_create',
+                name: 'browser_session_create',
                 arguments: { configuration: token, use_proxy: true },
             });
             expect(isError(conflict)).toBe(true);
@@ -723,18 +723,18 @@ describe('steel_session_create', () => {
         const h = await connect(testDeps({ api }));
         try {
             const options = await h.client.callTool({
-                name: 'steel_session_options',
+                name: 'browser_session_options',
                 arguments: { url: 'https://example.com', goal: 'account', needs: ['persist_profile'] },
             });
             const configuration = (options as { structuredContent?: { create_template?: { configuration?: string } } })
                 .structuredContent?.create_template?.configuration;
             const first = await h.client.callTool({
-                name: 'steel_session_create',
+                name: 'browser_session_create',
                 arguments: { configuration, profile_id: profile.id },
             });
             expect(first.structuredContent).toMatchObject({ profile_id: profile.id, persist_profile: true });
             const second = await h.client.callTool({
-                name: 'steel_session_create',
+                name: 'browser_session_create',
                 arguments: { configuration, profile_id: profile.id },
             });
             expect(isError(second)).toBe(true);
@@ -742,12 +742,12 @@ describe('steel_session_create', () => {
             expect(api.created).toHaveLength(1);
             const handle = (first as { structuredContent?: { session_id?: string } }).structuredContent?.session_id;
             const released = await h.client.callTool({
-                name: 'steel_session_release',
+                name: 'browser_session_release',
                 arguments: { session_id: handle },
             });
             expect(released.structuredContent).toMatchObject({ profile_id: profile.id, persist_profile: true });
             const third = await h.client.callTool({
-                name: 'steel_session_create',
+                name: 'browser_session_create',
                 arguments: { configuration, profile_id: profile.id },
             });
             expect(isError(third)).toBe(false);
@@ -765,7 +765,7 @@ describe('steel_session_create', () => {
 
     it('starts a genuine mobile browser when mobile device mode is requested', async () => {
         const result = await harness.client.callTool({
-            name: 'steel_session_create',
+            name: 'browser_session_create',
             arguments: { device: 'mobile' },
         });
 
@@ -804,7 +804,7 @@ describe('steel_session_create', () => {
         const h = await connect(testDeps({ api }));
         try {
             const result = await h.client.callTool({
-                name: 'steel_session_create',
+                name: 'browser_session_create',
                 arguments: { timeout_ms: 1_200_000 },
             });
             expect(isError(result)).toBe(false);
@@ -819,7 +819,7 @@ describe('steel_session_create', () => {
     });
 
     it('reports takeover, local-file and actual inactivity capabilities on creation', async () => {
-        const result = await harness.client.callTool({ name: 'steel_session_create', arguments: {} });
+        const result = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
         expect(result.structuredContent).toMatchObject({
             inactivity_timeout_ms: 600_000,
             takeover: { inline_viewer: true, external_player: true, exclusive_control: true },
@@ -831,7 +831,7 @@ describe('steel_session_create', () => {
 
     it('keeps profile and namespace arguments metadata-only', async () => {
         const { tools } = await harness.client.listTools();
-        const create = tools.find(tool => tool.name === 'steel_session_create');
+        const create = tools.find(tool => tool.name === 'browser_session_create');
         const properties = (create?.inputSchema as { properties?: Record<string, { description?: string }> })
             ?.properties;
         expect(properties?.profile_id?.description).toMatch(/not secret/i);
@@ -840,7 +840,7 @@ describe('steel_session_create', () => {
 
     it('does not expose infrastructure region placement as a model choice', async () => {
         const { tools } = await harness.client.listTools();
-        const create = tools.find(tool => tool.name === 'steel_session_create');
+        const create = tools.find(tool => tool.name === 'browser_session_create');
         const schema = create?.inputSchema as { properties?: Record<string, unknown> } | undefined;
 
         expect(schema?.properties).not.toHaveProperty('region');
@@ -848,7 +848,7 @@ describe('steel_session_create', () => {
 
     it('activates a credential namespace with fixed safe injection options', async () => {
         const result = await harness.client.callTool({
-            name: 'steel_session_create',
+            name: 'browser_session_create',
             arguments: { namespace: 'work-account' },
         });
         expect(isError(result)).toBe(false);
@@ -875,10 +875,10 @@ describe('steel_session_create', () => {
     });
 
     it('returns the viewer URL and states the retention policy in its description', async () => {
-        const result = await harness.client.callTool({ name: 'steel_session_create', arguments: {} });
+        const result = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
         expect(textOf(result)).toContain('https://app.steel.dev/sessions/');
         const { tools } = await harness.client.listTools();
-        const create = tools.find(tool => tool.name === 'steel_session_create');
+        const create = tools.find(tool => tool.name === 'browser_session_create');
         expect(create?.description).toMatch(/release/i);
         expect(create?.description).toMatch(/billed|charged|costs/i);
     });
@@ -889,7 +889,7 @@ describe('steel_session_create', () => {
         );
         try {
             await newSession(h);
-            const second = await h.client.callTool({ name: 'steel_session_create', arguments: {} });
+            const second = await h.client.callTool({ name: 'browser_session_create', arguments: {} });
             expect(isError(second)).toBe(true);
             expect(textOf(second)).toMatch(/one browser session at a time/i);
         } finally {
@@ -903,7 +903,7 @@ describe('steel_session_create', () => {
         );
         try {
             const result = await h.client.callTool({
-                name: 'steel_session_create',
+                name: 'browser_session_create',
                 arguments: { use_proxy: true },
             });
             expect(isError(result)).toBe(true);
@@ -914,10 +914,10 @@ describe('steel_session_create', () => {
     });
 });
 
-describe('steel_session_release', () => {
+describe('browser_session_release', () => {
     it('distinguishes the discarded browser from a retained saved profile', async () => {
         const { tools } = await harness.client.listTools();
-        const release = tools.find(tool => tool.name === 'steel_session_release');
+        const release = tools.find(tool => tool.name === 'browser_session_release');
         expect(release?.description).toMatch(/current URL.*session-only page state.*gone/i);
         expect(release?.description).toMatch(/profile.*saved only when persistence was requested/i);
     });
@@ -925,11 +925,11 @@ describe('steel_session_release', () => {
     it('captures the session context before releasing it', async () => {
         const handle = await newSession();
         await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://example.com/' },
         });
         const result = await harness.client.callTool({
-            name: 'steel_session_release',
+            name: 'browser_session_release',
             arguments: { session_id: handle },
         });
         expect(textOf(result)).toContain('https://example.com/');
@@ -938,9 +938,9 @@ describe('steel_session_release', () => {
 
     it('is idempotent: releasing twice is not an error', async () => {
         const handle = await newSession();
-        await harness.client.callTool({ name: 'steel_session_release', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_session_release', arguments: { session_id: handle } });
         const second = await harness.client.callTool({
-            name: 'steel_session_release',
+            name: 'browser_session_release',
             arguments: { session_id: handle },
         });
         expect(isError(second)).toBe(false);
@@ -950,10 +950,10 @@ describe('steel_session_release', () => {
     it('closes the browser connection as well as the Steel session', async () => {
         const handle = await newSession();
         await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://example.com/' },
         });
-        await harness.client.callTool({ name: 'steel_session_release', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_session_release', arguments: { session_id: handle } });
         expect(harness.deps.pool.closed).toHaveLength(1);
     });
 });
@@ -961,11 +961,11 @@ describe('steel_session_release', () => {
 describe('stateful tools reject an unknown handle', () => {
     it('answers a handle this credential never created with a not-found error', async () => {
         const calls = [
-            { name: 'steel_navigate', arguments: { url: 'https://x.test' } },
-            { name: 'steel_snapshot', arguments: {} },
-            { name: 'steel_find', arguments: { text: 'x' } },
-            { name: 'steel_act', arguments: { action: 'click', target: '@e1' } },
-            { name: 'steel_wait_for', arguments: { text: 'x' } },
+            { name: 'browser_navigate', arguments: { url: 'https://x.test' } },
+            { name: 'browser_snapshot', arguments: {} },
+            { name: 'browser_find', arguments: { text: 'x' } },
+            { name: 'browser_act', arguments: { action: 'click', target: '@e1' } },
+            { name: 'browser_wait_for', arguments: { text: 'x' } },
         ];
         for (const call of calls) {
             const result = await harness.client.callTool({
@@ -978,16 +978,16 @@ describe('stateful tools reject an unknown handle', () => {
     });
 });
 
-describe('steel_navigate', () => {
-    it('names steel_snapshot for cursor continuation and refuses cursor on navigate', async () => {
+describe('browser_navigate', () => {
+    it('names browser_snapshot for cursor continuation and refuses cursor on navigate', async () => {
         const handle = await newSession();
         const first = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://example.com/', include_snapshot: true, max_tokens: 1 },
         });
-        expect(textOf(first)).toMatch(/call steel_snapshot.*same session_id.*cursor/i);
+        expect(textOf(first)).toMatch(/call browser_snapshot.*same session_id.*cursor/i);
         const retry = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://example.com/', cursor: 'wrong-tool' },
         });
         expect(isError(retry)).toBe(true);
@@ -996,7 +996,7 @@ describe('steel_navigate', () => {
     it('reports the final URL and a change signal, with no snapshot by default', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://example.com/' },
         });
         const text = textOf(result);
@@ -1008,7 +1008,7 @@ describe('steel_navigate', () => {
     it('includes the snapshot only when asked', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_navigate',
+            name: 'browser_navigate',
             arguments: { session_id: handle, url: 'https://example.com/', include_snapshot: true },
         });
         expect(textOf(result)).toContain('### Snapshot');
@@ -1016,10 +1016,10 @@ describe('steel_navigate', () => {
     });
 });
 
-describe('steel_snapshot', () => {
+describe('browser_snapshot', () => {
     it('returns the accessibility tree with refs and a snapshot id', async () => {
         const handle = await newSession();
-        const result = await harness.client.callTool({ name: 'steel_snapshot', arguments: { session_id: handle } });
+        const result = await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
         const text = textOf(result);
         expect(text).toContain('button "Save" @e');
         expect(text).toMatch(/snapshot [a-z]?\d+/i);
@@ -1052,7 +1052,7 @@ describe('steel_snapshot', () => {
         try {
             const handle = await newSession(h);
             const first = await h.client.callTool({
-                name: 'steel_snapshot',
+                name: 'browser_snapshot',
                 arguments: { session_id: handle, max_tokens: 200 },
             });
             const firstText = textOf(first);
@@ -1084,7 +1084,7 @@ describe('steel_snapshot', () => {
             });
 
             const second = await h.client.callTool({
-                name: 'steel_snapshot',
+                name: 'browser_snapshot',
                 arguments: { session_id: handle, max_tokens: 200, cursor },
             });
             expect(isError(second), `continuation failed: ${textOf(second)}`).toBe(false);
@@ -1096,19 +1096,19 @@ describe('steel_snapshot', () => {
 
     it('fences the snapshot as untrusted page content', async () => {
         const handle = await newSession();
-        const result = await harness.client.callTool({ name: 'steel_snapshot', arguments: { session_id: handle } });
+        const result = await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
         expect(textOf(result)).toContain('<untrusted-page-content');
     });
 });
 
-describe('steel_find', () => {
+describe('browser_find', () => {
     it('requires a query and rejects unsafe regular expressions', async () => {
         const handle = await newSession();
-        const empty = await harness.client.callTool({ name: 'steel_find', arguments: { session_id: handle } });
+        const empty = await harness.client.callTool({ name: 'browser_find', arguments: { session_id: handle } });
         expect(isError(empty)).toBe(true);
         expect(textOf(empty)).toMatch(/text.*regex.*role/i);
         const unsafe = await harness.client.callTool({
-            name: 'steel_find',
+            name: 'browser_find',
             arguments: { session_id: handle, regex: '(a+)+$' },
         });
         expect(isError(unsafe)).toBe(true);
@@ -1117,7 +1117,7 @@ describe('steel_find', () => {
     it('returns only the matching nodes, not the whole page', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_find',
+            name: 'browser_find',
             arguments: { session_id: handle, text: 'About' },
         });
         const text = textOf(result);
@@ -1128,26 +1128,26 @@ describe('steel_find', () => {
     it('says so, and suggests a snapshot, when nothing matches', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_find',
+            name: 'browser_find',
             arguments: { session_id: handle, text: 'Checkout' },
         });
         expect(textOf(result)).toMatch(/no .*match/i);
-        expect(textOf(result)).toContain('steel_snapshot');
+        expect(textOf(result)).toContain('browser_snapshot');
     });
 });
 
-describe('steel_act', () => {
+describe('browser_act', () => {
     it('documents which actions do not need a target', async () => {
-        const tool = (await harness.client.listTools()).tools.find(entry => entry.name === 'steel_act');
+        const tool = (await harness.client.listTools()).tools.find(entry => entry.name === 'browser_act');
         const properties = (tool?.inputSchema as { properties?: Record<string, { description?: string }> })?.properties;
         expect(properties?.target?.description).toMatch(/not needed.*scroll.*press.*go_back.*dismiss_overlays/i);
     });
 
     it('clicks a ref and reports what changed', async () => {
         const handle = await newSession();
-        await harness.client.callTool({ name: 'steel_snapshot', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
         const result = await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'click', target: '@e1' },
         });
         const text = textOf(result);
@@ -1157,9 +1157,9 @@ describe('steel_act', () => {
 
     it('says nothing changed rather than reporting a bare success', async () => {
         const handle = await newSession();
-        await harness.client.callTool({ name: 'steel_snapshot', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
         const result = await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'click', target: '@e1' },
         });
         expect(textOf(result)).toMatch(/nothing changed/i);
@@ -1168,18 +1168,18 @@ describe('steel_act', () => {
     it('rejects an unknown action at the schema boundary', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_act',
+            name: 'browser_act',
             arguments: { session_id: handle, action: 'teleport' },
         });
         expect(isError(result)).toBe(true);
     });
 });
 
-describe('steel_wait_for', () => {
+describe('browser_wait_for', () => {
     it('requires an explicit condition at the schema boundary', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_wait_for',
+            name: 'browser_wait_for',
             arguments: { session_id: handle },
         });
         expect(isError(result)).toBe(true);
@@ -1188,7 +1188,7 @@ describe('steel_wait_for', () => {
     it('fails with a timeout that names the condition', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_wait_for',
+            name: 'browser_wait_for',
             arguments: { session_id: handle, text: 'Never', timeout_ms: 50 },
         });
         expect(isError(result)).toBe(true);
@@ -1196,7 +1196,7 @@ describe('steel_wait_for', () => {
     });
 });
 
-describe('steel_session_diagnostics', () => {
+describe('browser_session_diagnostics', () => {
     it("rediscovers only this principal's live handles without reading Steel logs", async () => {
         const first = await newSession();
         const second = await newSession();
@@ -1206,7 +1206,7 @@ describe('steel_session_diagnostics', () => {
             expiresAt: Date.now() + 60_000,
         });
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: { list_live: true },
         });
         expect(isError(result)).toBe(false);
@@ -1223,19 +1223,19 @@ describe('steel_session_diagnostics', () => {
         expect(harness.deps.api.logReads).toEqual([]);
     });
     it('advertises historical retrieval as read-only and never as a reason to create a session', async () => {
-        const tool = (await harness.client.listTools()).tools.find(entry => entry.name === 'steel_session_diagnostics');
+        const tool = (await harness.client.listTools()).tools.find(entry => entry.name === 'browser_session_diagnostics');
         expect(tool?.description).toMatch(/released|finished|historical/i);
         expect(tool?.description).toMatch(/never starts|does not start/i);
 
         const properties = (tool?.inputSchema as { properties?: Record<string, { description?: string }> })?.properties;
-        expect(properties?.steel_session_id?.description).toMatch(/dashboard|released|finished/i);
+        expect(properties?.finished_session_id?.description).toMatch(/dashboard|released|finished/i);
     });
 
     it('reads an existing Steel session directly without creating a browser', async () => {
         const oldSteelSessionId = '7dbe8308-59f0-4f6f-8685-8fe9673d98fa';
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
-            arguments: { steel_session_id: oldSteelSessionId },
+            name: 'browser_session_diagnostics',
+            arguments: { finished_session_id: oldSteelSessionId },
         });
 
         expect(isError(result)).toBe(false);
@@ -1244,7 +1244,7 @@ describe('steel_session_diagnostics', () => {
         expect(harness.deps.api.traceReads).toEqual([oldSteelSessionId]);
         expect(harness.deps.api.logReads).toEqual([oldSteelSessionId]);
         const structured = (result as { structuredContent?: Record<string, unknown> }).structuredContent;
-        expect(structured?.steel_session_id).toBe(oldSteelSessionId);
+        expect(structured?.finished_session_id).toBe(oldSteelSessionId);
         expect(structured).not.toHaveProperty('session_id');
     });
 
@@ -1270,7 +1270,7 @@ describe('steel_session_diagnostics', () => {
             })
         );
         try {
-            const result = await historical.client.callTool({ name: 'steel_session_diagnostics', arguments: {} });
+            const result = await historical.client.callTool({ name: 'browser_session_diagnostics', arguments: {} });
             expect(isError(result)).toBe(false);
             expect(historical.deps.api.created).toEqual([]);
             expect(historical.deps.api.sessionLists).toEqual([{ status: 'released', limit: 1 }]);
@@ -1285,11 +1285,11 @@ describe('steel_session_diagnostics', () => {
     it('can read the same Steel session after its live MCP handle is released', async () => {
         const handle = await newSession();
         const steelSessionId = harness.deps.api.created[0]!.sessionId;
-        await harness.client.callTool({ name: 'steel_session_release', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_session_release', arguments: { session_id: handle } });
 
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
-            arguments: { steel_session_id: steelSessionId },
+            name: 'browser_session_diagnostics',
+            arguments: { finished_session_id: steelSessionId },
         });
 
         expect(isError(result)).toBe(false);
@@ -1300,25 +1300,25 @@ describe('steel_session_diagnostics', () => {
 
     it('does not suggest creating a replacement when only a released MCP handle is available', async () => {
         const handle = await newSession();
-        await harness.client.callTool({ name: 'steel_session_release', arguments: { session_id: handle } });
+        await harness.client.callTool({ name: 'browser_session_release', arguments: { session_id: handle } });
 
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: { session_id: handle },
         });
 
         expect(isError(result)).toBe(true);
         expect(textOf(result)).toMatch(/Steel session.*dashboard|most recent released/i);
-        expect(textOf(result)).not.toMatch(/call steel_session_create|start a new/i);
+        expect(textOf(result)).not.toMatch(/call browser_session_create|start a new/i);
         expect(harness.deps.api.created).toHaveLength(1);
         expect(harness.deps.api.traceReads).toEqual([]);
         expect(harness.deps.api.logReads).toEqual([]);
     });
 
     it('does not create a browser when there is no released session to inspect', async () => {
-        const result = await harness.client.callTool({ name: 'steel_session_diagnostics', arguments: {} });
+        const result = await harness.client.callTool({ name: 'browser_session_diagnostics', arguments: {} });
         expect(isError(result)).toBe(true);
-        expect(textOf(result)).toMatch(/No released Steel session/i);
+        expect(textOf(result)).toMatch(/No released browser session/i);
         expect(harness.deps.api.created).toEqual([]);
         expect(harness.deps.api.traceReads).toEqual([]);
         expect(harness.deps.api.logReads).toEqual([]);
@@ -1327,10 +1327,10 @@ describe('steel_session_diagnostics', () => {
     it('rejects an ambiguous live-and-historical target before reading either one', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: {
                 session_id: handle,
-                steel_session_id: '167d821e-c6a9-44c6-9ee3-c164a75306cc',
+                finished_session_id: '167d821e-c6a9-44c6-9ee3-c164a75306cc',
             },
         });
         expect(isError(result)).toBe(true);
@@ -1344,8 +1344,8 @@ describe('steel_session_diagnostics', () => {
         );
         try {
             const result = await partial.client.callTool({
-                name: 'steel_session_diagnostics',
-                arguments: { steel_session_id: '6f894bea-26ef-48d2-845b-037e639154a8' },
+                name: 'browser_session_diagnostics',
+                arguments: { finished_session_id: '6f894bea-26ef-48d2-845b-037e639154a8' },
             });
             expect(isError(result)).toBe(false);
             expect(textOf(result)).toContain('ERR_ABORTED');
@@ -1366,8 +1366,8 @@ describe('steel_session_diagnostics', () => {
         );
         try {
             const result = await unavailable.client.callTool({
-                name: 'steel_session_diagnostics',
-                arguments: { steel_session_id: '811e22dd-383f-4a61-b3b7-6f6411671689' },
+                name: 'browser_session_diagnostics',
+                arguments: { finished_session_id: '811e22dd-383f-4a61-b3b7-6f6411671689' },
             });
             expect(isError(result)).toBe(true);
             expect(textOf(result)).not.toMatch(/No traces or logs recorded/i);
@@ -1380,7 +1380,7 @@ describe('steel_session_diagnostics', () => {
     it('returns a compact timeline built from agent traces and logs', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: { session_id: handle },
         });
         const text = textOf(result);
@@ -1391,13 +1391,13 @@ describe('steel_session_diagnostics', () => {
         expect(text).toMatch(/takeover clicks, scrolling and typing.*may be absent/i);
         const structured = (result as { structuredContent?: Record<string, unknown> }).structuredContent;
         expect(structured?.session_id).toBe(handle);
-        expect(structured).not.toHaveProperty('steel_session_id');
+        expect(structured).not.toHaveProperty('finished_session_id');
     });
 
     it('names the real activity type and the page each one happened on', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: { session_id: handle },
         });
         const text = textOf(result);
@@ -1415,7 +1415,7 @@ describe('steel_session_diagnostics', () => {
     it('wraps the timeline in the untrusted-content fence, sourced to the session', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: { session_id: handle },
         });
         const text = textOf(result);
@@ -1423,7 +1423,7 @@ describe('steel_session_diagnostics', () => {
         expect(text).toContain(UNTRUSTED_FENCE_CLOSE);
         expect(text).toMatch(/data, not instructions/i);
         // No single page produced this timeline, so the source names the session, not a URL.
-        expect(text).toContain(`source="steel-session:${handle}"`);
+        expect(text).toContain(`source="browser-session:${handle}"`);
     });
 
     it('neutralises a closing delimiter smuggled in through an accessible name', async () => {
@@ -1453,7 +1453,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(smuggled);
             const result = await smuggled.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             const text = textOf(result);
@@ -1487,7 +1487,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(invisible);
             const result = await invisible.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             const text = textOf(result);
@@ -1511,7 +1511,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(empty);
             const result = await empty.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             const text = textOf(result);
@@ -1525,7 +1525,7 @@ describe('steel_session_diagnostics', () => {
     it('renders a failed request from the JSON-encoded log payload', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: { session_id: handle },
         });
         const text = textOf(result);
@@ -1542,7 +1542,7 @@ describe('steel_session_diagnostics', () => {
     it('hides routine request and response log noise, and says how much it hid', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_session_diagnostics',
+            name: 'browser_session_diagnostics',
             arguments: { session_id: handle },
         });
         const text = textOf(result);
@@ -1577,7 +1577,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(broken);
             const result = await broken.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             const text = textOf(result);
@@ -1617,7 +1617,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(unknown);
             const result = await unknown.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             const text = textOf(result);
@@ -1646,7 +1646,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(withMore);
             const result = await withMore.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             expect(textOf(result)).toMatch(/more activity/i);
@@ -1681,7 +1681,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(typed);
             const result = await typed.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             const text = textOf(result);
@@ -1718,7 +1718,7 @@ describe('steel_session_diagnostics', () => {
         try {
             const handle = await newSession(content);
             const result = await content.client.callTool({
-                name: 'steel_session_diagnostics',
+                name: 'browser_session_diagnostics',
                 arguments: { session_id: handle },
             });
             const text = textOf(result);
@@ -1730,7 +1730,7 @@ describe('steel_session_diagnostics', () => {
     });
 });
 
-describe('steel_batch', () => {
+describe('browser_batch', () => {
     it('preflights every step before running an earlier mutation', async () => {
         const deps = testDeps();
         const h = await connect(deps);
@@ -1744,12 +1744,12 @@ describe('steel_batch', () => {
             const handle = await newSession(h);
             touched.length = 0;
             const result = await h.client.callTool({
-                name: 'steel_batch',
+                name: 'browser_batch',
                 arguments: {
                     session_id: handle,
                     steps: [
-                        { tool: 'steel_navigate', arguments: { url: 'https://example.com/' } },
-                        { tool: 'steel_wait_for', arguments: { action: 'click', text: 'Later' } },
+                        { tool: 'browser_navigate', arguments: { url: 'https://example.com/' } },
+                        { tool: 'browser_wait_for', arguments: { action: 'click', text: 'Later' } },
                     ],
                 },
             });
@@ -1762,7 +1762,7 @@ describe('steel_batch', () => {
     });
     it('limits batching to known reversible checkout steps before handoff boundaries', async () => {
         const { tools } = await harness.client.listTools();
-        const batch = tools.find(tool => tool.name === 'steel_batch');
+        const batch = tools.find(tool => tool.name === 'browser_batch');
         expect(batch?.description).toMatch(/known reversible.*later targets.*no fresh read/i);
         expect(batch?.description).toMatch(/failure.*login\/challenge/i);
         expect(batch?.description).toMatch(/hand off.*same session.*only unrun steps/i);
@@ -1772,13 +1772,13 @@ describe('steel_batch', () => {
     it('runs several steps in one call and returns one snapshot at the end', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_batch',
+            name: 'browser_batch',
             arguments: {
                 session_id: handle,
                 include_snapshot: true,
                 steps: [
-                    { tool: 'steel_navigate', arguments: { url: 'https://example.com/' } },
-                    { tool: 'steel_act', arguments: { action: 'scroll', value: '300' } },
+                    { tool: 'browser_navigate', arguments: { url: 'https://example.com/' } },
+                    { tool: 'browser_act', arguments: { action: 'scroll', value: '300' } },
                 ],
             },
         });
@@ -1789,13 +1789,13 @@ describe('steel_batch', () => {
         expect(text).toMatch(/step 2/i);
     });
 
-    it('rejects a step whose action is not one steel_act accepts', async () => {
+    it('rejects a step whose action is not one browser_act accepts', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_batch',
+            name: 'browser_batch',
             arguments: {
                 session_id: handle,
-                steps: [{ tool: 'steel_act', arguments: { action: 'teleport' } }],
+                steps: [{ tool: 'browser_act', arguments: { action: 'teleport' } }],
             },
         });
         expect(isError(result)).toBe(true);
@@ -1807,10 +1807,10 @@ describe('steel_batch', () => {
     it('rejects a nested wait longer than the standalone wait maximum', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_batch',
+            name: 'browser_batch',
             arguments: {
                 session_id: handle,
-                steps: [{ tool: 'steel_wait_for', arguments: { text: 'Later', timeout_ms: 120_001 } }],
+                steps: [{ tool: 'browser_wait_for', arguments: { text: 'Later', timeout_ms: 120_001 } }],
             },
         });
         expect(isError(result)).toBe(true);
@@ -1820,12 +1820,12 @@ describe('steel_batch', () => {
     it('stops at the first failure and names the failing index', async () => {
         const handle = await newSession();
         const result = await harness.client.callTool({
-            name: 'steel_batch',
+            name: 'browser_batch',
             arguments: {
                 session_id: handle,
                 steps: [
-                    { tool: 'steel_act', arguments: { action: 'click', target: '@e404' } },
-                    { tool: 'steel_navigate', arguments: { url: 'https://example.com/second' } },
+                    { tool: 'browser_act', arguments: { action: 'click', target: '@e404' } },
+                    { tool: 'browser_navigate', arguments: { url: 'https://example.com/second' } },
                 ],
             },
         });

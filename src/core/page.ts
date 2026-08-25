@@ -22,7 +22,7 @@ import type { CdpSession } from './steel/cdp.js';
 /**
  * The interaction verbs, mirroring the shape of Steel's own computer-action union.
  *
- * The single source of truth: `steel_act`'s enum and `steel_batch`'s step validation both build
+ * The single source of truth: `browser_act`'s enum and `browser_batch`'s step validation both build
  * from this, so a verb can never be accepted by one and unknown to the other.
  */
 export const ACTIONS = [
@@ -375,7 +375,7 @@ export class BrowserPage {
         });
         if (!nodeId) {
             throw new SteelToolError(
-                `No element matches the selector "${target}". Call steel_find to locate the element and use its @eN ref instead.`,
+                `No element matches the selector "${target}". Call browser_find to locate the element and use its @eN ref instead.`,
                 { code: 'ref_not_found', details: { target } }
             );
         }
@@ -397,7 +397,7 @@ export class BrowserPage {
     private requireTarget(request: ActRequest): string {
         if (!request.target) {
             throw new SteelToolError(
-                `The "${request.action}" action needs a target: a @eN ref from steel_snapshot or steel_find, or a CSS selector.`,
+                `The "${request.action}" action needs a target: a @eN ref from browser_snapshot or browser_find, or a CSS selector.`,
                 { code: 'invalid_argument' }
             );
         }
@@ -750,7 +750,7 @@ export class BrowserPage {
             case 'dismiss_overlays':
                 return this.dismissOverlays();
             default:
-                // Reachable because steel_batch validates a string before casting it. Falling off
+                // Reachable because browser_batch validates a string before casting it. Falling off
                 // the switch would return undefined and surface as a bare TypeError.
                 throw new SteelToolError(
                     `"${String(request.action)}" is not an action this tool performs. ` +
@@ -803,7 +803,7 @@ export class BrowserPage {
 
         if (condition === undefined) {
             throw new SteelToolError(
-                'steel_wait_for needs one of text, selector or url. There is no network-idle wait: name what you are waiting for.',
+                'browser_wait_for needs one of text, selector or url. There is no network-idle wait: name what you are waiting for.',
                 { code: 'invalid_argument' }
             );
         }

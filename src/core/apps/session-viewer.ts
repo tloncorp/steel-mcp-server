@@ -3,7 +3,7 @@
 import { SERVER_VERSION } from '../version.js';
 
 /** The `ui://` resource URI the app is served under. */
-export const SESSION_VIEWER_URI = 'ui://steel/session-viewer';
+export const SESSION_VIEWER_URI = 'ui://browser/session-viewer';
 
 /** MIME type `resources/read` must report for a host to render the app as an MCP App. */
 export const SESSION_VIEWER_MIME_TYPE = 'text/html;profile=mcp-app';
@@ -15,7 +15,7 @@ export const SESSION_VIEWER_MIME_TYPE = 'text/html;profile=mcp-app';
  * is a drive-capable credential: it is validated, opened, and never rendered, logged or put in the
  * DOM. See `validateCdpUrl` and `scrubCredentials`.
  */
-export const SESSION_VIEWER_LIVE_VIEW_TOOL = 'steel_session_live_view';
+export const SESSION_VIEWER_LIVE_VIEW_TOOL = 'browser_session_live_view';
 
 /**
  * Message the app posts to its parent once its host handshake is done.
@@ -537,7 +537,7 @@ export function describeViewerPhase(phase: ViewerPhase): ViewerStatus {
             return {
                 busy: false,
                 headline: 'The live view is unavailable',
-                detail: 'Steel returned no live view for this session.',
+                detail: 'The browser service returned no live view for this session.',
             };
         case 'connecting':
             return { busy: true, headline: 'Connecting to the browser', detail: '' };
@@ -862,7 +862,7 @@ export const SESSION_VIEWER_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src wss:; base-uri 'none'; form-action 'none'">
-<title>Steel live browser session</title>
+<title>Live browser session</title>
 <style>
 :root{color-scheme:light dark;--bg:#f4f4f5;--fg:#18181b;--dim:#52525b;--line:#d4d4d8}
 @media (prefers-color-scheme: dark){:root{--bg:#111113;--fg:#f4f4f5;--dim:#a1a1aa;--line:#3f3f46}}
@@ -906,7 +906,7 @@ p:empty{display:none}
 var READY_MESSAGE = ${JSON.stringify(SESSION_VIEWER_READY_MESSAGE_TYPE)};
 var LIVE_VIEW_TOOL = ${JSON.stringify(SESSION_VIEWER_LIVE_VIEW_TOOL)};
 var IDLE_AFTER_MS = ${SESSION_VIEWER_IDLE_AFTER_MS};
-var APP_INFO = { name: 'steel-session-viewer', version: ${JSON.stringify(SERVER_VERSION)} };
+var APP_INFO = { name: 'browser-session-viewer', version: ${JSON.stringify(SERVER_VERSION)} };
 var UI_PROTOCOL_VERSIONS = ['2026-01-26', '2025-11-25', '2025-06-18'];
 var CALL_TIMEOUT_MS = 15000;
 // How long a pushed session is waited for, then when to ask again while the server has none yet.

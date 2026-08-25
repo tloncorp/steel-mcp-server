@@ -64,10 +64,10 @@ cannot ask Steel to persist a new or updated profile.
 Mirroring Profiles, Credentials, dedicated IPs, and the full Sessions API as
 separate tools would solve discovery by making the model surface larger and
 harder to use. Instead, add exactly one deterministic, progressively disclosed
-`steel_session_options` tool. It recommends the smallest supported
+`browser_session_options` tool. It recommends the smallest supported
 configuration for an explicit task, returns only safe account metadata, and
 mints a short-lived signed configuration consumed by the existing
-`steel_session_create` tool. Advanced settings then cost response tokens only
+`browser_session_create` tool. Advanced settings then cost response tokens only
 when requested, while `tools/list` remains fixed, cacheable, and within its
 existing 17,000-byte browse budget.
 
@@ -80,7 +80,7 @@ argument or result.
 
 These decisions are part of the contract:
 
-1. Add **one** model-visible tool, `steel_session_options`. Do not add separate
+1. Add **one** model-visible tool, `browser_session_options`. Do not add separate
    profile, credential, recipe, proxy, or settings tools.
 2. Keep `tools/list` deterministic and principal-independent. Account data is
    returned by a tool call; it never appears in a tool enum, description,
@@ -94,8 +94,8 @@ These decisions are part of the contract:
    result type and tests pin the result; omitting the serialized output schema
    is a deliberate byte-budget tradeoff.
 6. Use a signed, ten-minute, principal-bound `configuration` string to carry
-   advanced settings from `steel_session_options` to
-   `steel_session_create`. It is signed, not encrypted, so it may contain safe
+   advanced settings from `browser_session_options` to
+   `browser_session_create`. It is signed, not encrypted, so it may contain safe
    selectors and settings but never secrets or free-form task text.
 7. Keep direct, simple create arguments for compatibility. Reject conflicts
    between a signed configuration and a direct override instead of silently
@@ -109,7 +109,7 @@ These decisions are part of the contract:
     archive or call profile create/update endpoints.
 11. Keep the browser headful and the viewer interactive. Headless/Selenium
     recipes conflict with this MCP's human handoff and live-view safety model.
-12. Keep `steel_session_live_view` last and app-only. Insert the new tool
+12. Keep `browser_session_live_view` last and app-only. Insert the new tool
     immediately before it, preserving the byte-identical prefix of the
     existing model-visible tool list.
 
@@ -121,7 +121,7 @@ and [tools contract](https://modelcontextprotocol.io/specification/2026-07-28/se
 
 ## Exact MCP contract
 
-### `steel_session_options` input
+### `browser_session_options` input
 
 Keep serialized Zod descriptions short; detailed guidance belongs in results.
 
@@ -158,7 +158,7 @@ Validation rules:
 - `human_captcha` is valid only with `interact` or `account` and conflicts with
   `protected_text`.
 - `persist_profile` is valid only with `goal: 'account'`.
-- A default read with no session-only need recommends `steel_scrape`, not a
+- A default read with no session-only need recommends `browser_scrape`, not a
   billed session.
 
 ### Signed configuration
@@ -200,12 +200,12 @@ The token is a reusable recommendation during its short TTL, not an
 authorization grant. At create time, re-read account limits and revalidate any
 selected profile or credential metadata.
 
-### `steel_session_create` additions and compatibility
+### `browser_session_create` additions and compatibility
 
 Add one permanent field:
 
 ```ts
-configuration?: string; // signed value from steel_session_options
+configuration?: string; // signed value from browser_session_options
 ```
 
 Retain the current simple fields:
@@ -258,7 +258,7 @@ fallback. The fallback must not duplicate a large catalog.
 interface SessionOptionsResult {
     viable: boolean;
     target_origin: string;
-    recommended_tool: 'steel_scrape' | 'steel_session_create';
+    recommended_tool: 'browser_scrape' | 'browser_session_create';
     create_template?: {
         configuration?: string;
         namespace?: string;
@@ -322,7 +322,7 @@ annotations: {
 }
 ```
 
-Set `TOOL_COSTS.steel_session_options = 3`: account plus long-running planning
+Set `TOOL_COSTS.browser_session_options = 3`: account plus long-running planning
 may perform profile, credential, and account-details reads. It starts no
 browser and consumes no concurrency slot.
 
@@ -334,8 +334,8 @@ requested rows:
 
 | Task request | Recommendation emitted by this MCP | Deliberate behavior |
 |---|---|---|
-| Plain read | `steel_scrape({url})` | Starts no billed session. |
-| Standard interaction | `steel_session_create({})` | The MCP sends its configured 15-minute hard and 2-minute idle defaults, not bare Steel's five-minute default. |
+| Plain read | `browser_scrape({url})` | Starts no billed session. |
+| Standard interaction | `browser_session_create({})` | The MCP sends its configured 15-minute hard and 2-minute idle defaults, not bare Steel's five-minute default. |
 | Long-running | Signed `timeout`; normal idle derivation remains active | Keep headful so viewer and handoff work; clamp to account maximum. |
 | Protected text extraction | Residential proxy, CAPTCHA solving, conservative bandwidth blocking | Set only after explicit `protected_text`; keep stylesheets, block images/media. |
 | CAPTCHA for a person | `solveCaptcha: true` plus `autoCaptchaSolving: false` | The existing viewer/handoff supplies human control. |
@@ -386,7 +386,7 @@ Do not expose these in this plan:
   JSON.
 - A prompt, resource, resource template, dynamic tool enum, or hostname-based
   recommendation database.
-- Changes to Plan 003's automatic handoff inside `steel_batch`. Preserve its
+- Changes to Plan 003's automatic handoff inside `browser_batch`. Preserve its
   landed replay/boundary contract rather than redesigning it here.
 
 ## Current state
@@ -429,7 +429,7 @@ Do not expose these in this plan:
   ```
 
 - A prototype serialized through the real MCP server/client path measured the
-  current `steel_session_create` at 1,920 bytes, a compact version at 1,181,
+  current `browser_session_create` at 1,920 bytes, a compact version at 1,181,
   and a compact options tool at 868. Treat these as feasibility measurements,
   not permission to skip the real post-change measurement.
 - `tests/budget/tool-bytes.test.ts:22-47` measures actual `tools/list` JSON; use
@@ -555,7 +555,7 @@ Do not run `npm install` unless dependencies are missing. This plan adds none.
      `GET /v1/credentials?origin=&namespace=` still exist;
    - credential list items remain metadata-only;
    - session responses still expose `profileId`.
-5. Record exact current `steel_session_create` and full browse serialized bytes
+5. Record exact current `browser_session_create` and full browse serialized bytes
    through the budget seam before changing schemas.
 
 **Verify**:
@@ -695,7 +695,7 @@ Account behavior:
 - A discovery failure yields an empty section plus typed warning; it does not
   erase another successful section or expose raw error text.
 - If no credential matches and navigation later reveals a different login/SSO
-  origin, tell the agent to call `steel_session_options` again for that
+  origin, tell the agent to call `browser_session_options` again for that
   observed origin. Never broaden matching to a parent domain or wildcard.
 - On self-host, return `viable: false` for explicit cloud-only needs/account
   mode, named warnings, and no token. Plain read/interaction remains viable.
@@ -732,13 +732,13 @@ Expected: the pure matrix and pagination pass before registration.
 
 ### Step 4: Register one tool and lock the byte budget immediately
 
-Register `steel_session_options` in `src/core/profiles.ts` immediately before
-`steel_session_live_view`. It belongs to `browse` only. Add it at the same
+Register `browser_session_options` in `src/core/profiles.ts` immediately before
+`browser_session_live_view`. It belongs to `browse` only. Add it at the same
 position in `manifest.json` and update exact-order tests in
 `tests/unit/profiles.test.ts`, `tests/integration/tools.test.ts`, and
 `tests/unit/mcpb-manifest.test.ts`.
 
-Compact `steel_session_create` prose while preserving:
+Compact `browser_session_create` prose while preserving:
 
 - billed/limited-concurrency browser;
 - prompt release and scrape-first guidance;
@@ -765,8 +765,8 @@ Add per-tool caps and assertions:
 
 ```json
 "toolBytes": {
-  "steel_session_create": 1200,
-  "steel_session_options": 950
+  "browser_session_create": 1200,
+  "browser_session_options": 950
 }
 ```
 
@@ -906,8 +906,8 @@ delay is mocked credential grace.
 Add one concise instruction:
 
 ```text
-For non-default setup, call steel_session_options with the target URL and
-explicit needs, then pass its signed configuration to steel_session_create.
+For non-default setup, call browser_session_options with the target URL and
+explicit needs, then pass its signed configuration to browser_session_create.
 ```
 
 Trim duplicated setup prose so instructions target <=2,000 bytes while
@@ -1017,7 +1017,7 @@ The step-level tests are mandatory. Review these cross-layer properties:
 - [ ] Plans 002, 003, and 005 were DONE and this plan was refreshed against
       their merged baseline without discarding user changes.
 - [ ] Current Steel contracts support every selected field/projection.
-- [ ] `steel_session_options` is the only new model-visible tool.
+- [ ] `browser_session_options` is the only new model-visible tool.
 - [ ] Planner is deterministic with no hostname/task-prose heuristic or fetch.
 - [ ] Correct principal can discover profiles/namespaces safely.
 - [ ] Namespace injection sends explicit credential flags and no secret.

@@ -109,7 +109,7 @@ function page<T>(items: T[], fingerprintInput: unknown, cursor?: string): { item
 
 export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_session_options',
+        'browser_session_options',
         {
             title: 'Plan session',
             description: 'Find profiles/credentials; plan setup.',
@@ -117,7 +117,7 @@ export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
             inputSchema: optionsSchema,
         },
         async (args, ctx) =>
-            guard(deps, 'steel_session_options', ctx.mcpReq, async () => {
+            guard(deps, 'browser_session_options', ctx.mcpReq, async () => {
                 const origin = targetOrigin(args.url);
                 const needs = (args.needs ?? []) as SessionNeed[];
                 const warnings: Array<{ code: string; message: string }> = [];
@@ -129,7 +129,7 @@ export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
                     const result = {
                         viable: false,
                         target_origin: origin,
-                        recommended_tool: 'steel_session_create',
+                        recommended_tool: 'browser_session_create',
                         effective_defaults: {
                             headless: false,
                             interactive_viewer: true,
@@ -141,7 +141,7 @@ export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
                         warnings: [
                             {
                                 code: 'self_hosted_unsupported',
-                                message: 'This setup needs Steel Cloud account capabilities.',
+                                message: 'This setup needs account capabilities unavailable in this browser deployment.',
                             },
                         ],
                         unresolved: [],
@@ -238,7 +238,7 @@ export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
                     viable: true,
                     target_origin: origin,
                     recommended_tool: recipe.recommendedTool,
-                    ...(recipe.recommendedTool === 'steel_scrape'
+                    ...(recipe.recommendedTool === 'browser_scrape'
                         ? { scrape_arguments: { url: args.url } }
                         : { create_template: createTemplate }),
                     effective_defaults: {

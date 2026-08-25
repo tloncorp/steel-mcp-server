@@ -164,7 +164,7 @@ export async function resolveManualHandoff(
 /** Registers the ordinary human-control path; no detector or failure is required to invoke it. */
 export function registerSessionHandoff(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_session_handoff',
+        'browser_session_handoff',
         {
             title: 'Hand the browser to a person',
             description:
@@ -178,7 +178,7 @@ export function registerSessionHandoff(host: ToolHost, deps: ServerDeps): void {
                 .strict(),
         },
         async (args, ctx) =>
-            guard(deps, 'steel_session_handoff', ctx.mcpReq, async () => {
+            guard(deps, 'browser_session_handoff', ctx.mcpReq, async () => {
                 const record = await deps.registry.resolveForAgent(args.session_id, deps.principal);
                 return resolveManualHandoff({
                     host,
@@ -187,7 +187,7 @@ export function registerSessionHandoff(host: ToolHost, deps: ServerDeps): void {
                     handle: args.session_id,
                     record,
                     reason: args.reason,
-                    tool: 'steel_session_handoff',
+                    tool: 'browser_session_handoff',
                 });
             })
     );

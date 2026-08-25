@@ -78,12 +78,12 @@ describe('HostedRuntime rate limiting', () => {
         const { runtime } = harness();
         const noisy = runtime.depsForRequest(input('ste-noisy'));
         const quiet = runtime.depsForRequest(input('ste-quiet'));
-        const cost = toolCost('steel_scrape');
+        const cost = toolCost('browser_scrape');
         const calls = Math.ceil(DEFAULT_RATE_LIMIT_POLICY.burstCapacity / cost);
 
-        for (let call = 0; call < calls; call++) await noisy.limiter?.charge(noisy.principal, 'steel_scrape');
-        await expect(noisy.limiter?.charge(noisy.principal, 'steel_scrape')).rejects.toThrow(RATE_LIMIT_NAME);
-        await expect(quiet.limiter?.charge(quiet.principal, 'steel_scrape')).resolves.toBeUndefined();
+        for (let call = 0; call < calls; call++) await noisy.limiter?.charge(noisy.principal, 'browser_scrape');
+        await expect(noisy.limiter?.charge(noisy.principal, 'browser_scrape')).rejects.toThrow(RATE_LIMIT_NAME);
+        await expect(quiet.limiter?.charge(quiet.principal, 'browser_scrape')).resolves.toBeUndefined();
 
         await runtime.close();
     });
@@ -145,6 +145,28 @@ describe('HostedRuntime dependency isolation', () => {
         await expect(stranger.registry.resolve(record.handle, stranger.principal)).rejects.toThrow(
             /No live browser session/
         );
+
+        await runtime.close();
+    });
+
+    it('uses a caller credential only as tenant identity for a self-hosted browser', async () => {
+        const runtime = new HostedRuntime({
+            configForCredential: () =>
+                loadConfig({
+                    STEEL_LOCAL: 'true',
+                    STEEL_BASE_URL: 'http://steel-browser:3000',
+                    STEEL_MAX_SESSIONS: '4',
+                }),
+            createApi: () => new FakeSteelApi(),
+            createPool: () => new RecordingPool(),
+        });
+
+        const moon = runtime.depsForRequest(input('moon-secret'));
+
+        expect(moon.config.deployment).toBe('self_hosted');
+        expect(moon.config.apiKey).toBeUndefined();
+        expect(moon.config.maxConcurrentSessions).toBe(4);
+        expect(moon.principal).toBe(principalFromCredential('moon-secret'));
 
         await runtime.close();
     });

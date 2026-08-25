@@ -20,7 +20,7 @@ interface Harness {
 }
 
 interface ReplayStructured {
-    steel_session_id?: string;
+    finished_session_id?: string;
     status?: string;
     selected_by?: string;
     dashboard_url?: string;
@@ -82,10 +82,10 @@ function expectNoSessionMutation(api: FakeSteelApi): void {
     expect(api.hlsReads).toEqual([]);
 }
 
-describe('steel_session_replay descriptor', () => {
+describe('browser_session_replay descriptor', () => {
     it('keeps the strict optional UUID but has no replay app resource URI', async () => {
         const harness = await connect(new FakeSteelApi());
-        const replay = (await harness.client.listTools()).tools.find(tool => tool.name === 'steel_session_replay');
+        const replay = (await harness.client.listTools()).tools.find(tool => tool.name === 'browser_session_replay');
 
         expect(replay?.description).toMatch(/explicitly asks.*watch or replay/i);
         expect(replay?.description).toMatch(/diagnostics.*inspect or explain/i);
@@ -97,8 +97,8 @@ describe('steel_session_replay descriptor', () => {
         const schema = replay?.inputSchema as
             | { properties?: Record<string, { pattern?: string }>; required?: string[]; additionalProperties?: boolean }
             | undefined;
-        expect(Object.keys(schema?.properties ?? {})).toEqual(['steel_session_id']);
-        expect(schema?.properties?.steel_session_id?.pattern).toMatch(/0-9a-f/);
+        expect(Object.keys(schema?.properties ?? {})).toEqual(['finished_session_id']);
+        expect(schema?.properties?.finished_session_id?.pattern).toMatch(/0-9a-f/);
         expect(schema?.required ?? []).toEqual([]);
         expect(schema?.additionalProperties).toBe(false);
     });
@@ -107,7 +107,7 @@ describe('steel_session_replay descriptor', () => {
         const api = new FakeSteelApi({ sessions: { sessions: [releasedSession(LATEST_ID)] } });
         const harness = await connect(api);
         const result = await harness.client.callTool({
-            name: 'steel_session_replay',
+            name: 'browser_session_replay',
             arguments: { session_id: 'sess_old_handle' },
         });
 
@@ -118,22 +118,22 @@ describe('steel_session_replay descriptor', () => {
     });
 });
 
-describe('steel_session_replay dashboard delivery', () => {
+describe('browser_session_replay dashboard delivery', () => {
     it('returns only the safe dashboard link for an explicit released UUID', async () => {
         const api = new FakeSteelApi({
             sessionsById: { [EXPLICIT_ID]: releasedSession(EXPLICIT_ID) },
         });
         const harness = await connect(api);
         const result = await harness.client.callTool({
-            name: 'steel_session_replay',
-            arguments: { steel_session_id: EXPLICIT_ID },
+            name: 'browser_session_replay',
+            arguments: { finished_session_id: EXPLICIT_ID },
         });
 
         expect(isError(result)).toBe(false);
         expect(api.sessionReads).toEqual([EXPLICIT_ID]);
         expect(api.sessionLists).toEqual([]);
         expect(structuredOf(result)).toEqual({
-            steel_session_id: EXPLICIT_ID,
+            finished_session_id: EXPLICIT_ID,
             status: 'released',
             selected_by: 'explicit',
             dashboard_url: `https://app.steel.dev/sessions/${EXPLICIT_ID}`,
@@ -149,13 +149,13 @@ describe('steel_session_replay dashboard delivery', () => {
             sessionsById: { [LATEST_ID]: releasedSession(LATEST_ID) },
         });
         const harness = await connect(api);
-        const result = await harness.client.callTool({ name: 'steel_session_replay', arguments: {} });
+        const result = await harness.client.callTool({ name: 'browser_session_replay', arguments: {} });
 
         expect(isError(result)).toBe(false);
         expect(api.sessionLists).toEqual([{ status: 'released', limit: 1 }]);
         expect(api.sessionReads).toEqual([LATEST_ID]);
         expect(structuredOf(result)).toMatchObject({
-            steel_session_id: LATEST_ID,
+            finished_session_id: LATEST_ID,
             selected_by: 'latest_released',
             dashboard_url: `https://app.steel.dev/sessions/${LATEST_ID}`,
         });
@@ -171,8 +171,8 @@ describe('steel_session_replay dashboard delivery', () => {
             });
             const harness = await connect(api);
             const result = await harness.client.callTool({
-                name: 'steel_session_replay',
-                arguments: { steel_session_id: EXPLICIT_ID },
+                name: 'browser_session_replay',
+                arguments: { finished_session_id: EXPLICIT_ID },
             });
 
             expect(isError(result)).toBe(true);
@@ -201,8 +201,8 @@ describe('steel_session_replay dashboard delivery', () => {
             const api = new FakeSteelApi({ sessionsById: { [EXPLICIT_ID]: session } });
             const harness = await connect(api);
             const result = await harness.client.callTool({
-                name: 'steel_session_replay',
-                arguments: { steel_session_id: EXPLICIT_ID },
+                name: 'browser_session_replay',
+                arguments: { finished_session_id: EXPLICIT_ID },
             });
 
             expect(isError(result)).toBe(true);
@@ -215,8 +215,8 @@ describe('steel_session_replay dashboard delivery', () => {
         const api = new FakeSteelApi({ sessionsById: { [EXPLICIT_ID]: releasedSession(EXPLICIT_ID) } });
         const harness = await connect(api, 'self_hosted');
         const result = await harness.client.callTool({
-            name: 'steel_session_replay',
-            arguments: { steel_session_id: EXPLICIT_ID },
+            name: 'browser_session_replay',
+            arguments: { finished_session_id: EXPLICIT_ID },
         });
 
         expect(isError(result)).toBe(true);

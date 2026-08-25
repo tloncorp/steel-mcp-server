@@ -243,7 +243,7 @@ export function withSteelCallSpan<T>(tracer: Tracer, target: SteelCallSpanTarget
  * Runs one CDP operation inside a client span.
  *
  * Connecting is the only CDP step that gets its own span. A span per command would drown a trace,
- * because `steel_wait_for` polls the page for as long as its timeout allows; the commands a tool
+ * because `browser_wait_for` polls the page for as long as its timeout allows; the commands a tool
  * issues after connecting are covered by the tool-call span around them.
  */
 export function withCdpSpan<T>(

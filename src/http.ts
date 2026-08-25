@@ -40,13 +40,20 @@ interface CredentialResult {
     invalidAuthorization: boolean;
 }
 
-/** Header credentials are authoritative; a malformed header never falls back to a query secret. */
+/**
+ * Header credentials are authoritative; a malformed Authorization header never falls back to a
+ * second carrier. X-Api-Key exists for trusted upstream proxies (including an Urbit moon) that
+ * already authenticate their caller with that key and cannot rewrite it as a Bearer credential.
+ */
 function credentialFromRequest(request: Request): CredentialResult {
     const authorization = request.headers.get('authorization');
     if (authorization !== null) {
         const match = /^Bearer[ \t]+([^ \t]+)[ \t]*$/i.exec(authorization);
         return match?.[1] ? { credential: match[1], invalidAuthorization: false } : { invalidAuthorization: true };
     }
+
+    const apiKeyHeader = request.headers.get('x-api-key')?.trim();
+    if (apiKeyHeader) return { credential: apiKeyHeader, invalidAuthorization: false };
 
     const queryCredential = new URL(request.url).searchParams.get('apiKey')?.trim();
     return {
@@ -74,6 +81,7 @@ function redactRequestCredential(request: Request): Request {
     url.searchParams.delete('apiKey');
     const safeRequest = new Request(url, request);
     safeRequest.headers.delete('authorization');
+    safeRequest.headers.delete('x-api-key');
     return safeRequest;
 }
 
@@ -115,7 +123,7 @@ export function createSteelHttpHandler(options: SteelHttpHandlerOptions): McpHtt
                 return unauthorized('Authorization must use a non-empty Bearer token.');
             }
             if (!auth.credential) {
-                return unauthorized('Provide a Steel API key as a Bearer token or apiKey query parameter.');
+                return unauthorized('Provide a tenant key as Bearer, X-Api-Key, or the apiKey query parameter.');
             }
 
             const safeRequest = redactRequestCredential(request);

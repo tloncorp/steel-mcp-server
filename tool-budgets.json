@@ -6,7 +6,7 @@
         "browse": { "tools": 16, "bytes": 17000 }
     },
     "toolBytes": {
-        "steel_session_create": 1200,
-        "steel_session_options": 950
+        "browser_session_create": 1200,
+        "browser_session_options": 950
     }
 }

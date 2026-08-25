@@ -103,7 +103,7 @@ function meteredHost(server: McpServer, limiter: RateLimiter, principal: string)
  */
 export function createSteelMcpServer(deps: ServerDeps): McpServer {
     const server = new McpServer(
-        { name: 'steel', title: 'Steel Browser', version: SERVER_VERSION },
+        { name: 'browser', title: 'Browser', version: SERVER_VERSION },
         {
             capabilities: {
                 tools: {},

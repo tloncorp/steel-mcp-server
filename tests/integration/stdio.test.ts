@@ -37,12 +37,12 @@ afterAll(async () => {
 describe('the stdio binary', () => {
     it('serves tools/list over a real stdio connection', async () => {
         const { tools } = await client.listTools();
-        expect(tools.map(tool => tool.name)).toContain('steel_scrape');
+        expect(tools.map(tool => tool.name)).toContain('browser_scrape');
         expect(tools).toHaveLength(16);
     });
 
     it('advertises the server instructions', () => {
-        expect(client.getInstructions()).toMatch(/steel_scrape/);
+        expect(client.getInstructions()).toMatch(/browser_scrape/);
     });
 
     it('keeps stdout free of anything but JSON-RPC, logging to stderr instead', async () => {
@@ -56,24 +56,24 @@ describe('the stdio binary', () => {
 
     it('answers a stateful call with an unknown handle as a tool error, not a protocol error', async () => {
         const result = await client.callTool({
-            name: 'steel_snapshot',
+            name: 'browser_snapshot',
             arguments: { session_id: 'sess_does_not_exist' },
         });
         expect((result as { isError?: boolean }).isError).toBe(true);
     });
 
     it('rejects an argument that fails schema validation', async () => {
-        const result = await client.callTool({ name: 'steel_scrape', arguments: { url: 'not a url' } });
+        const result = await client.callTool({ name: 'browser_scrape', arguments: { url: 'not a url' } });
         expect((result as { isError?: boolean }).isError).toBe(true);
     });
 
     it('applies no request budget, because one process serves one credential', async () => {
         // Far more calls than the hosted budget admits, so a limiter on this path would surface as a
         // rate_limited error instead of the unknown-handle error every one of these earns.
-        const calls = Math.ceil((DEFAULT_RATE_LIMIT_POLICY.burstCapacity / toolCost('steel_snapshot')) * 3);
+        const calls = Math.ceil((DEFAULT_RATE_LIMIT_POLICY.burstCapacity / toolCost('browser_snapshot')) * 3);
         for (let call = 0; call < calls; call++) {
             const result = (await client.callTool({
-                name: 'steel_snapshot',
+                name: 'browser_snapshot',
                 arguments: { session_id: 'sess_does_not_exist' },
             })) as { isError?: boolean; content?: Array<{ text?: string }> };
             const text = result.content?.map(block => block.text ?? '').join('\n') ?? '';

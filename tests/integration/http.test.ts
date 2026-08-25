@@ -16,7 +16,7 @@ const MODERN_PROTOCOL_VERSION = '2026-07-28';
 
 function modernRequest(
     url = 'https://mcp.steel.dev/mcp',
-    options: { authorization?: string; host?: string; origin?: string; method?: string } = {}
+    options: { authorization?: string; xApiKey?: string; host?: string; origin?: string; method?: string } = {}
 ): Request {
     const method = options.method ?? 'POST';
     const headers = new Headers({
@@ -24,6 +24,7 @@ function modernRequest(
         accept: 'application/json',
     });
     if (options.authorization !== undefined) headers.set('authorization', options.authorization);
+    if (options.xApiKey !== undefined) headers.set('x-api-key', options.xApiKey);
     if (options.origin !== undefined) headers.set('origin', options.origin);
     if (method === 'POST') {
         headers.set('content-type', 'application/json');
@@ -132,6 +133,30 @@ describe('hosted HTTP authentication', () => {
         expect(seen[1]?.request.url).not.toContain('apiKey');
     });
 
+    it('accepts X-Api-Key as a tenant credential and redacts it before constructing dependencies', async () => {
+        const { handler, seen } = harness();
+        openHandlers.push(handler);
+
+        const response = await handler.fetch(modernRequest(undefined, { xApiKey: 'moon-secret' }));
+
+        expect(response.status).toBe(200);
+        expect(seen).toHaveLength(1);
+        expect(seen[0]?.credential).toBe('moon-secret');
+        expect(seen[0]?.principal).toBe(principalFromCredential('moon-secret'));
+        expect(seen[0]?.request.headers.get('x-api-key')).toBeNull();
+    });
+
+    it('keeps Bearer authoritative when both supported credential headers are present', async () => {
+        const { handler, seen } = harness();
+        openHandlers.push(handler);
+
+        await handler.fetch(
+            modernRequest(undefined, { authorization: 'Bearer bearer-secret', xApiKey: 'moon-secret' })
+        );
+
+        expect(seen.map(input => input.credential)).toEqual(['bearer-secret']);
+    });
+
     it('does not downgrade a malformed Authorization header to a query credential', async () => {
         const { handler, seen } = harness();
         openHandlers.push(handler);
@@ -235,7 +260,7 @@ describe('hosted HTTP rate limiting', () => {
     }
 
     async function callScrape(handler: { fetch(request: Request): Promise<Response> }, credential: string) {
-        const response = await handler.fetch(toolRequest(credential, 'steel_scrape', { url: 'https://example.com/' }));
+        const response = await handler.fetch(toolRequest(credential, 'browser_scrape', { url: 'https://example.com/' }));
         const body = (await response.json()) as {
             result: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown };
         };
@@ -257,7 +282,7 @@ describe('hosted HTTP rate limiting', () => {
 
         expect(rejected.isError).toBe(true);
         expect(rejected.text).toContain(RATE_LIMIT_NAME);
-        expect(rejected.text).toContain('steel_scrape');
+        expect(rejected.text).toContain('browser_scrape');
         expect(rejected.text).toMatch(/Retry after \d+s/);
         expect(rejected.text).toMatch(/Retry-After: \d+s/);
         expect(rejected.structured).toMatchObject({ error: { code: 'rate_limited' } });
@@ -297,7 +322,7 @@ describe('hosted HTTP session isolation', () => {
             },
         });
 
-        const createdResponse = await handler.fetch(toolRequest('ste-owner', 'steel_session_create', {}));
+        const createdResponse = await handler.fetch(toolRequest('ste-owner', 'browser_session_create', {}));
         const created = (await createdResponse.json()) as {
             result: { structuredContent?: { session_id?: string } };
         };
@@ -305,24 +330,24 @@ describe('hosted HTTP session isolation', () => {
         expect(sessionId).toMatch(/^sess_/);
 
         const ownerResponse = await handler.fetch(
-            toolRequest('ste-owner', 'steel_session_diagnostics', { session_id: sessionId })
+            toolRequest('ste-owner', 'browser_session_diagnostics', { session_id: sessionId })
         );
         const owner = (await ownerResponse.json()) as { result: { isError?: boolean } };
         expect(owner.result.isError).not.toBe(true);
 
         const strangerResponse = await handler.fetch(
-            toolRequest('ste-stranger', 'steel_session_diagnostics', { session_id: sessionId })
+            toolRequest('ste-stranger', 'browser_session_diagnostics', { session_id: sessionId })
         );
         const stranger = (await strangerResponse.json()) as {
             result: { isError?: boolean; content?: Array<{ text?: string }> };
         };
         expect(stranger.result.isError).toBe(true);
         expect(stranger.result.content?.map(block => block.text).join('\n')).toMatch(
-            /MCP session handle.*Steel dashboard/i
+            /MCP session handle.*session dashboard/i
         );
 
         const releaseResponse = await handler.fetch(
-            toolRequest('ste-owner', 'steel_session_release', { session_id: sessionId })
+            toolRequest('ste-owner', 'browser_session_release', { session_id: sessionId })
         );
         expect(releaseResponse.status).toBe(200);
     });
@@ -368,7 +393,7 @@ describe('hosted HTTP session isolation', () => {
         });
 
         const ownerResponse = await handler.fetch(
-            toolRequest('ste-replay-owner', 'steel_session_replay', { steel_session_id: replayId })
+            toolRequest('ste-replay-owner', 'browser_session_replay', { finished_session_id: replayId })
         );
         const owner = (await ownerResponse.json()) as { result: { isError?: boolean; structuredContent?: unknown } };
         expect(ownerResponse.status).toBe(200);
@@ -378,7 +403,7 @@ describe('hosted HTTP session isolation', () => {
         expect(JSON.stringify(owner.result.structuredContent)).not.toMatch(/manifest|kind.*hls|steel\/replay/i);
 
         const strangerResponse = await handler.fetch(
-            toolRequest('ste-replay-stranger', 'steel_session_replay', { steel_session_id: replayId })
+            toolRequest('ste-replay-stranger', 'browser_session_replay', { finished_session_id: replayId })
         );
         const stranger = (await strangerResponse.json()) as {
             result: {
@@ -395,7 +420,7 @@ describe('hosted HTTP session isolation', () => {
         expect(strangerResponse.status).toBe(200);
         expect(stranger.result.isError).toBe(true);
         expect(stranger.result.structuredContent?.error?.code).toBe('not_found');
-        expect(strangerVisible).toMatch(/No Steel session with that UUID was found for this credential/i);
+        expect(strangerVisible).toMatch(/No browser session with that UUID was found for this credential/i);
         expect(strangerVisible).not.toContain(privateUpstreamMarker);
         expect(strangerVisible).not.toContain('#EXTM3U');
         expect(strangerApi.sessionReads).toEqual([replayId]);
@@ -439,20 +464,20 @@ describe('hosted HTTP session isolation', () => {
         const first = replica();
         const second = replica();
 
-        const createdResponse = await first.handler.fetch(toolRequest('ste-a', 'steel_session_create', {}));
+        const createdResponse = await first.handler.fetch(toolRequest('ste-a', 'browser_session_create', {}));
         const created = (await createdResponse.json()) as { result: { structuredContent?: { session_id?: string } } };
         const sessionId = created.result.structuredContent?.session_id;
         expect(sessionId).toMatch(/^sess_/);
         expect(first.api.created).toHaveLength(1);
 
         const elsewhere = await second.handler.fetch(
-            toolRequest('ste-a', 'steel_session_diagnostics', { session_id: sessionId })
+            toolRequest('ste-a', 'browser_session_diagnostics', { session_id: sessionId })
         );
         const diagnostics = (await elsewhere.json()) as { result: { isError?: boolean } };
         expect(diagnostics.result.isError, 'the second replica could not see the handle').not.toBe(true);
 
         const releaseResponse = await second.handler.fetch(
-            toolRequest('ste-a', 'steel_session_release', { session_id: sessionId })
+            toolRequest('ste-a', 'browser_session_release', { session_id: sessionId })
         );
         expect(releaseResponse.status).toBe(200);
         expect(second.api.released).toEqual([first.api.created[0]?.sessionId]);
@@ -490,7 +515,7 @@ describe('hosted HTTP session isolation', () => {
             },
         });
 
-        await handler.fetch(toolRequest('ste-disconnected', 'steel_session_create', {}, controller.signal));
+        await handler.fetch(toolRequest('ste-disconnected', 'browser_session_create', {}, controller.signal));
 
         expect(api.created).toHaveLength(1);
         await expect.poll(() => api.released, { timeout: 1_000 }).toEqual([api.created[0]?.sessionId]);

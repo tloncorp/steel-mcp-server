@@ -77,7 +77,7 @@ describe('loadConfig', () => {
     it('warns about the retired GLOBAL_WAIT_SECONDS instead of ignoring it', () => {
         const config = loadConfig({ STEEL_API_KEY: 'k', GLOBAL_WAIT_SECONDS: '2' });
         expect(config.warnings.join(' ')).toMatch(/GLOBAL_WAIT_SECONDS/);
-        expect(config.warnings.join(' '), 'the warning does not name the replacement').toMatch(/steel_wait_for/);
+        expect(config.warnings.join(' '), 'the warning does not name the replacement').toMatch(/browser_wait_for/);
     });
 
     it('has no warnings for a plain configuration', () => {
@@ -88,6 +88,16 @@ describe('loadConfig', () => {
         const config = loadConfig({ STEEL_BASE_URL: 'http://localhost:3000' });
         expect(config.deployment).toBe('self_hosted');
         expect(config.maxConcurrentSessions).toBe(1);
+    });
+
+    it('lets a patched multi-session self-host set its concurrency limit', () => {
+        const config = loadConfig({
+            STEEL_BASE_URL: 'http://steel-browser:3000',
+            STEEL_MAX_SESSIONS: '4',
+        });
+
+        expect(config.deployment).toBe('self_hosted');
+        expect(config.maxConcurrentSessions).toBe(4);
     });
 
     it('reads the profile from the environment and rejects unknown names', () => {

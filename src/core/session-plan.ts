@@ -40,7 +40,7 @@ export interface RecipeInput {
 }
 
 export interface Recipe {
-    recommendedTool: 'steel_scrape' | 'steel_session_create';
+    recommendedTool: 'browser_scrape' | 'browser_session_create';
     state?: SessionPlanState;
     rationale: string[];
     warnings: Array<{ code: string; message: string }>;
@@ -59,7 +59,7 @@ export function recommendSession(input: RecipeInput): Recipe {
     const needs = new Set(input.needs);
     if (input.goal === 'read' && needs.size === 0) {
         return {
-            recommendedTool: 'steel_scrape',
+            recommendedTool: 'browser_scrape',
             rationale: ['A stateless read needs no billed browser.'],
             warnings: [],
         };
@@ -100,7 +100,7 @@ export function recommendSession(input: RecipeInput): Recipe {
         });
     }
     return {
-        recommendedTool: 'steel_session_create',
+        recommendedTool: 'browser_session_create',
         state: { v: 1, origin: input.origin, goal: input.goal, settings, accountContext: input.goal === 'account' },
         rationale: rationale.length ? rationale : ['A stateful interaction needs one live browser session.'],
         warnings,

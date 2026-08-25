@@ -59,18 +59,18 @@ export async function snapshotSection(
         pageState: pageStateLine(snapshot),
         snapshot: fenceUntrusted(paged.text, { finalUrl: snapshot.url, fetchedAt: deps.now().toISOString() }),
         pagination: paged.truncated
-            ? `The page is larger than the budget. Call steel_snapshot with the same session_id and cursor="${paged.nextCursor}", ` +
-              'or use steel_find to jump straight to the element you need.'
+            ? `The page is larger than the budget. Call browser_snapshot with the same session_id and cursor="${paged.nextCursor}", ` +
+              'or use browser_find to jump straight to the element you need.'
             : snapshot.truncated
-              ? 'The page has more nodes than this tool renders. Use steel_find to locate a specific element.'
+              ? 'The page has more nodes than this tool renders. Use browser_find to locate a specific element.'
               : undefined,
     };
 }
 
 export function registerNavigate(host: ToolHost, deps: ServerDeps): void {
-    const handoff = handoffFor(host, deps, 'steel_navigate');
+    const handoff = handoffFor(host, deps, 'browser_navigate');
     host.registerTool(
-        'steel_navigate',
+        'browser_navigate',
         {
             title: 'Open a URL in a browser session',
             description:
@@ -90,7 +90,7 @@ export function registerNavigate(host: ToolHost, deps: ServerDeps): void {
                 .strict(),
         },
         async (args, ctx) =>
-            withPage(deps, 'steel_navigate', ctx.mcpReq, args.session_id, async (page, record) => {
+            withPage(deps, 'browser_navigate', ctx.mcpReq, args.session_id, async (page, record) => {
                 const outcome = await page.navigate(args.url);
                 const handedOff = await handoff(ctx, args.session_id, record, page);
                 if (handedOff) return handedOff;
@@ -121,13 +121,13 @@ export function registerNavigate(host: ToolHost, deps: ServerDeps): void {
 
 export function registerSnapshot(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_snapshot',
+        'browser_snapshot',
         {
             title: 'Read the page structure',
             description:
                 'Return the page as a compact accessibility tree with a @eN reference on every element you can ' +
                 'click or type into. This is the read to use before acting. Elements with no reference cannot be ' +
-                'targeted. If you already know what you are looking for, steel_find is much cheaper.',
+                'targeted. If you already know what you are looking for, browser_find is much cheaper.',
             annotations: { readOnlyHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
@@ -142,7 +142,7 @@ export function registerSnapshot(host: ToolHost, deps: ServerDeps): void {
                 .strict(),
         },
         async (args, ctx) =>
-            withPage(deps, 'steel_snapshot', ctx.mcpReq, args.session_id, async page => {
+            withPage(deps, 'browser_snapshot', ctx.mcpReq, args.session_id, async page => {
                 const sections = await snapshotSection(page, deps, {
                     interactiveOnly: args.interactive_only ?? true,
                     maxTokens: args.max_tokens,
@@ -168,7 +168,7 @@ function renderMatches(nodes: SnapshotNode[]): string {
 
 export function registerFind(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_find',
+        'browser_find',
         {
             title: 'Find an element on the page',
             description: 'Find labelled elements by text, safe regex or role and return their @eN refs.',
@@ -197,7 +197,7 @@ export function registerFind(host: ToolHost, deps: ServerDeps): void {
                 }),
         },
         async (args, ctx) =>
-            withPage(deps, 'steel_find', ctx.mcpReq, args.session_id, async page => {
+            withPage(deps, 'browser_find', ctx.mcpReq, args.session_id, async page => {
                 if (args.cursor === undefined) await page.snapshot({});
                 const matches = await page.find({
                     text: args.text,
@@ -212,8 +212,8 @@ export function registerFind(host: ToolHost, deps: ServerDeps): void {
                     return successResult(
                         {
                             result:
-                                'No element on this page matches that. Call steel_snapshot to see what is actually ' +
-                                'there, or steel_wait_for if you expect it to appear shortly.',
+                                'No element on this page matches that. Call browser_snapshot to see what is actually ' +
+                                'there, or browser_wait_for if you expect it to appear shortly.',
                             pageState: snapshot ? pageStateLine(snapshot) : undefined,
                         },
                         { match_count: 0 }
@@ -235,7 +235,7 @@ export function registerFind(host: ToolHost, deps: ServerDeps): void {
                             fetchedAt: deps.now().toISOString(),
                         }),
                         pagination: paged.truncated
-                            ? `Call steel_find again with the same arguments and cursor="${paged.nextCursor}".`
+                            ? `Call browser_find again with the same arguments and cursor="${paged.nextCursor}".`
                             : undefined,
                     },
                     {
@@ -252,15 +252,15 @@ export function registerFind(host: ToolHost, deps: ServerDeps): void {
 }
 
 export function registerAct(host: ToolHost, deps: ServerDeps): void {
-    const handoff = handoffFor(host, deps, 'steel_act');
+    const handoff = handoffFor(host, deps, 'browser_act');
     host.registerTool(
-        'steel_act',
+        'browser_act',
         {
             title: 'Interact with the page',
             description:
                 'Click, type, fill a form, select an option, hover, scroll, press a key, go back, or dismiss a ' +
-                'cookie or consent overlay. Target elements by the @eN reference from steel_snapshot or ' +
-                'steel_find, or by a CSS selector. Always reports what actually changed, and says so plainly when ' +
+                'cookie or consent overlay. Target elements by the @eN reference from browser_snapshot or ' +
+                'browser_find, or by a CSS selector. Always reports what actually changed, and says so plainly when ' +
                 'nothing did.',
             annotations: { destructiveHint: true, openWorldHint: true },
             inputSchema: z
@@ -290,9 +290,9 @@ export function registerAct(host: ToolHost, deps: ServerDeps): void {
                 .strict(),
         },
         async (args, ctx) =>
-            withPage(deps, 'steel_act', ctx.mcpReq, args.session_id, async (page, record) => {
+            withPage(deps, 'browser_act', ctx.mcpReq, args.session_id, async (page, record) => {
                 const prior = ctx.mcpReq.requestState<HandoffState>();
-                if (prior?.tool === 'steel_act' && prior.block === 'manual_step') {
+                if (prior?.tool === 'browser_act' && prior.block === 'manual_step') {
                     return resolveManualHandoff({
                         host,
                         deps,
@@ -300,7 +300,7 @@ export function registerAct(host: ToolHost, deps: ServerDeps): void {
                         handle: args.session_id,
                         record,
                         reason: 'manual_step',
-                        tool: 'steel_act',
+                        tool: 'browser_act',
                     });
                 }
                 const request: ActRequest = {
@@ -325,7 +325,7 @@ export function registerAct(host: ToolHost, deps: ServerDeps): void {
                             handle: args.session_id,
                             record,
                             reason: 'manual_step',
-                            tool: 'steel_act',
+                            tool: 'browser_act',
                             unavailableError: error,
                         });
                     }
@@ -357,9 +357,9 @@ export function registerAct(host: ToolHost, deps: ServerDeps): void {
 }
 
 export function registerWaitFor(host: ToolHost, deps: ServerDeps): void {
-    const handoff = handoffFor(host, deps, 'steel_wait_for');
+    const handoff = handoffFor(host, deps, 'browser_wait_for');
     host.registerTool(
-        'steel_wait_for',
+        'browser_wait_for',
         {
             title: 'Wait for something on the page',
             description: 'Wait for named text, a CSS selector or URL substring; pass at least one.',
@@ -386,7 +386,7 @@ export function registerWaitFor(host: ToolHost, deps: ServerDeps): void {
         async (args, ctx) =>
             withPage(
                 deps,
-                'steel_wait_for',
+                'browser_wait_for',
                 ctx.mcpReq,
                 args.session_id,
                 async (page, record): Promise<ToolOutcome> => {

@@ -20,7 +20,10 @@ import type { SteelApi } from './core/steel/types.js';
 import type { RequestDepsInput } from './http.js';
 
 export interface HostedRuntimeOptions {
-    /** Builds the complete Steel endpoint/profile configuration for this caller. */
+    /**
+     * Builds the Steel endpoint/profile configuration for this caller. Cloud configurations carry
+     * the caller credential to Steel; self-hosted configurations deliberately do not.
+     */
     configForCredential(credential: string): SteelConfig;
     createApi?: ((config: SteelConfig) => SteelApi) | undefined;
     createPool?: ((config: SteelConfig, settleMultiplier: number) => SessionPool) | undefined;
@@ -99,8 +102,11 @@ export class HostedRuntime {
         }
 
         const config = this.options.configForCredential(input.credential);
-        if (config.apiKey !== input.credential) {
-            throw new Error('configForCredential must preserve the request credential as config.apiKey.');
+        if (config.deployment === 'cloud' && config.apiKey !== input.credential) {
+            throw new Error('Cloud configForCredential must preserve the request credential as config.apiKey.');
+        }
+        if (config.deployment === 'self_hosted' && config.apiKey !== undefined) {
+            throw new Error('Self-hosted configForCredential must not forward the tenant credential to Steel.');
         }
         const settleMultiplier = config.deployment === 'cloud' ? 2 : 1;
         const api = this.createApi(config);

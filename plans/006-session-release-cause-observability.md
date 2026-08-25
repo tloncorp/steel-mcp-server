@@ -94,7 +94,7 @@ does not record which browser, user, profile, page or retailer was involved.
 
 Replace the collapsed release path with these stable causes:
 
-- `explicit`: `steel_session_release` completed successfully;
+- `explicit`: `browser_session_release` completed successfully;
 - `stream_close`: create-request cancellation or a process-owned runtime/transport
   shutdown released it;
 - `idle`: the registry idle threshold elapsed while hard expiry had not;

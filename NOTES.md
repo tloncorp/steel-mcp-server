@@ -54,7 +54,7 @@ a session and a preview rendered the viewer, and it sat on "waiting for a browse
 whole session:
 
 ```
-09:59:14.268  client → tools/call        id=4   (steel_session_create)
+09:59:14.268  client → tools/call        id=4   (browser_session_create)
 09:59:15.268  client → resources/read    id=5   (the viewer shell — 1s in, mid-call)
 09:59:15.449  server → result            id=4
 ```
@@ -67,7 +67,7 @@ a view to ask for the result**. A handshake that finishes after that single push
 
 Whether Claude sent the push and our view missed it, or never sent it, is not distinguishable from
 the log — and does not matter: either way a view whose only path to its session is that one
-notification is built on something unguaranteed. `steel_session_live_view` now resolves the caller's
+notification is built on something unguaranteed. `browser_session_live_view` now resolves the caller's
 newest live session when the app names none.
 
 Our own fake host had asserted the working case back at us — the same test-double pattern as §6.
@@ -342,7 +342,7 @@ deployment sitting behind a Traefik reverse proxy.
   the finding above.
 - **`tools/list` is not evidence that a credential works.** It never calls Steel, so a bridge that
   failed to substitute `${STEEL_AUTH_HEADER}` still lists all fourteen tools and looks healthy. Only
-  a tool that reaches Steel — `steel_scrape` is the cheapest, since it starts no session —
+  a tool that reaches Steel — `browser_scrape` is the cheapest, since it starts no session —
   distinguishes a live credential from a literal `${...}` sent as a bearer token.
 - **A proxy's port field is not the public port.** Coolify's domain field takes `https://host:8080`
   to name the *container* port and then serves it on 443, so `https://host:8080` from outside times

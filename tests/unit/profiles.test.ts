@@ -7,18 +7,18 @@ import { TOOL_TABLE, toolsForProfile } from '../../src/core/profiles.js';
 describe('toolsForProfile', () => {
     it('gives scrape only the three stateless tools, which start no billed session', () => {
         expect(toolsForProfile('scrape').map(tool => tool.name)).toEqual([
-            'steel_scrape',
-            'steel_screenshot',
-            'steel_pdf',
+            'browser_scrape',
+            'browser_screenshot',
+            'browser_pdf',
         ]);
     });
 
     it('gives browse the full default surface', () => {
         expect(toolsForProfile('browse')).toHaveLength(16);
-        expect(toolsForProfile('browse').map(tool => tool.name)).toContain('steel_session_handoff');
-        expect(toolsForProfile('browse').map(tool => tool.name)).toContain('steel_session_replay');
-        expect(toolsForProfile('browse').at(-2)?.name).toBe('steel_session_options');
-        expect(toolsForProfile('browse').at(-1)?.name).toBe('steel_session_live_view');
+        expect(toolsForProfile('browse').map(tool => tool.name)).toContain('browser_session_handoff');
+        expect(toolsForProfile('browse').map(tool => tool.name)).toContain('browser_session_replay');
+        expect(toolsForProfile('browse').at(-2)?.name).toBe('browser_session_options');
+        expect(toolsForProfile('browse').at(-1)?.name).toBe('browser_session_live_view');
     });
 
     it('resolves every declared profile name', () => {

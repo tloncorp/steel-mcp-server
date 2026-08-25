@@ -31,7 +31,7 @@ function context(options: { capabilities?: Record<string, unknown>; method?: str
 
 const STATE: HandoffState = {
     handle: 'sess_abc',
-    tool: 'steel_navigate',
+    tool: 'browser_navigate',
     block: 'login_wall',
     origin: 'https://app.test',
     round: 1,

@@ -26,7 +26,7 @@
 ## Why this matters
 
 Codex currently renders the Steel session viewer from both
-`steel_session_create` and `steel_session_handoff`, while the server's
+`browser_session_create` and `browser_session_handoff`, while the server's
 per-request UI-extension check evaluates false and therefore chooses URL
 elicitation. It is not yet established whether Codex declares the UI extension
 only at initialize time or omits it entirely; that distinction must be measured
@@ -46,7 +46,7 @@ given a capability it did not declare for that request.
 ## Current state
 
 - `src/core/tools/session.ts:91-93` is the canonical viewer attachment. It puts
-  `_meta.ui.resourceUri` on `steel_session_create`, so supporting hosts render a
+  `_meta.ui.resourceUri` on `browser_session_create`, so supporting hosts render a
   live viewer when the browser session is created:
 
   ```ts
@@ -59,7 +59,7 @@ given a capability it did not declare for that request.
 
   ```ts
   host.registerTool(
-      'steel_session_handoff',
+      'browser_session_handoff',
       {
           // ...
           _meta: { ui: { resourceUri: SESSION_VIEWER_URI } },
@@ -106,7 +106,7 @@ given a capability it did not declare for that request.
   ```
 
 - `src/core/apps/session-viewer.ts:1293-1305` shows why Hand back cannot finish
-  MRTR by itself. It only calls `steel_session_live_view` with `action: 'release'`:
+  MRTR by itself. It only calls `browser_session_live_view` with `action: 'release'`:
 
   ```js
   function releaseControl(){
@@ -117,7 +117,7 @@ given a capability it did not declare for that request.
 
 - The measured Codex run on 2026-08-10 rendered both tool-associated viewer
   surfaces, emitted a URL-mode Action required card, and ended
-  `steel_session_handoff` after roughly 34 seconds with
+  `browser_session_handoff` after roughly 34 seconds with
   `The person declined or cancelled browser control.` Do not copy the live
   player URL or session UUID from the run log into tests, docs, commits, or
   issues; the player URL is a drive-capable bearer capability.
@@ -170,7 +170,7 @@ necessary, stop and report first.
 
 - `src/core/apps/session-viewer.ts` — the control lease works; this plan does not
   invent an unsupported app-to-elicitation completion channel.
-- `src/core/tools/session.ts` — keep `steel_session_create` as the single
+- `src/core/tools/session.ts` — keep `browser_session_create` as the single
   canonical app attachment.
 - `src/core/registry.ts` and `src/core/registry-redis.ts` — no new handoff state
   or polling protocol is needed.
@@ -237,13 +237,13 @@ Classify the result:
 ### Step 2: Characterize the single-viewer contract
 
 In `tests/integration/apps.test.ts`, add a test beside the existing
-`steel_session_create` metadata test that lists tools and asserts:
+`browser_session_create` metadata test that lists tools and asserts:
 
-1. `steel_session_create` still has
+1. `browser_session_create` still has
    `_meta.ui.resourceUri === SESSION_VIEWER_URI`.
-2. `steel_session_handoff` has no `_meta.ui.resourceUri` and therefore cannot
+2. `browser_session_handoff` has no `_meta.ui.resourceUri` and therefore cannot
    instantiate a second copy of the session viewer.
-3. `steel_session_live_view` remains app-only with
+3. `browser_session_live_view` remains app-only with
    `_meta.ui.visibility === ['app']`.
 
 Name the test by behavior, e.g. `attaches the viewer once, when the session is
@@ -252,7 +252,7 @@ pin only the three metadata facts so unrelated descriptions can evolve.
 
 **Verify**:
 `npm run test:integration -- tests/integration/apps.test.ts`
-→ the new test fails only because `steel_session_handoff` still carries the
+→ the new test fails only because `browser_session_handoff` still carries the
 resource URI; all pre-existing tests pass.
 
 ### Step 3: Characterize the measured Codex route and conforming inline route
@@ -319,8 +319,8 @@ request-state, URL sanitization, and origin sanitization tests remain green.
 In `src/core/tools/handoff.ts`:
 
 1. Remove the `SESSION_VIEWER_URI` import.
-2. Remove `_meta.ui.resourceUri` from `steel_session_handoff`. Do not move it to
-   another tool; `steel_session_create` is already the canonical attachment.
+2. Remove `_meta.ui.resourceUri` from `browser_session_handoff`. Do not move it to
+   another tool; `browser_session_create` is already the canonical attachment.
 3. Replace the one shared `message` with mode-appropriate messages:
    - Inline/form mode: say to use the existing live browser viewer, choose Hand
      back when done, then confirm the pending request in the client.
@@ -431,7 +431,7 @@ Build/start the server through the same configuration used by Codex, then run a
 fresh task with a harmless page:
 
 1. Ask Codex to create one Steel session and navigate to `https://example.com`.
-2. Ask to see the live session, then invoke `steel_session_handoff` for review.
+2. Ask to see the live session, then invoke `browser_session_handoff` for review.
 3. Confirm exactly one Steel Browser viewer exists for the session. The handoff
    tool must not add a second viewer.
 4. Confirm Codex still shows Action required. This is the safe pause, not a
@@ -441,7 +441,7 @@ fresh task with a harmless page:
    - Route B: it contains the sanitized external-player URL. Complete the
      linked browser step, then return to Codex and accept/confirm the pending
      request.
-5. Confirm `steel_session_handoff` returns success (not
+5. Confirm `browser_session_handoff` returns success (not
    declined/cancelled), Codex takes a fresh snapshot, and only then resumes.
 6. Release the session.
 
@@ -457,9 +457,9 @@ whether Codex changed versions or the diagnostic observed a different wire era.
 ## Test plan
 
 - `tests/integration/apps.test.ts`
-  - one canonical viewer attachment on `steel_session_create`;
-  - no viewer resource URI on `steel_session_handoff`;
-  - app-only visibility unchanged on `steel_session_live_view`.
+  - one canonical viewer attachment on `browser_session_create`;
+  - no viewer resource URI on `browser_session_handoff`;
+  - app-only visibility unchanged on `browser_session_live_view`.
 - `tests/integration/mrtr.test.ts`
   - a fixture matching the measured Codex capability source selects the
     expected Route A or Route B behavior;
@@ -487,9 +487,9 @@ already expressible through `HarnessOptions.capabilities`.
 
 ## Done criteria
 
-- [ ] `steel_session_create` is the only model-visible tool with
+- [ ] `browser_session_create` is the only model-visible tool with
       `_meta.ui.resourceUri === SESSION_VIEWER_URI`.
-- [ ] `steel_session_handoff` no longer imports or references
+- [ ] `browser_session_handoff` no longer imports or references
       `SESSION_VIEWER_URI`.
 - [ ] URL-mode handoff explicitly requires finishing in the linked browser and
       confirming the pending request in the MCP client.
@@ -513,8 +513,8 @@ Stop and report back; do not improvise if:
 
 - Any in-scope current-state excerpt has materially drifted from commit
   `5b2cb76`.
-- Removing `_meta.ui` from `steel_session_handoff` also prevents Codex from
-  rendering the viewer attached to `steel_session_create`.
+- Removing `_meta.ui` from `browser_session_handoff` also prevents Codex from
+  rendering the viewer attached to `browser_session_create`.
 - The Step 1 diagnostic exposes a capability combination not covered by Route A
   or Route B, or the final smoke differs from the probe.
 - A proposed fix requires client-name sniffing, assuming rendered UI without a

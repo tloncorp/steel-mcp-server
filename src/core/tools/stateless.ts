@@ -160,14 +160,14 @@ function boundedMetadata(metadata: Record<string, unknown>): Record<string, stri
 
 export function registerScrape(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_scrape',
+        'browser_scrape',
         {
             title: 'Read a web page',
             description:
                 'Read a web page as markdown or HTML through a real browser, so JavaScript-rendered pages and ' +
                 'sites that block plain HTTP fetches still work. Starts no browser session, so there is nothing ' +
                 'to release afterwards. Always returns the page links and metadata alongside the content. ' +
-                'Use this first for anything you only need to read; reach for steel_session_create only when you ' +
+                'Use this first for anything you only need to read; reach for browser_session_create only when you ' +
                 'need to click, type or move through several pages.',
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
             inputSchema: z
@@ -180,7 +180,7 @@ export function registerScrape(host: ToolHost, deps: ServerDeps): void {
                     use_proxy: z
                         .boolean()
                         .optional()
-                        .describe('Route through a Steel-managed residential proxy. Needs a verified paid balance.'),
+                        .describe('Request an additional provider-managed proxy when this deployment supports it.'),
                     delay_ms: z.number().int().min(0).max(30_000).optional().describe('Wait this long after load.'),
                     max_tokens: maxTokensSchema,
                     cursor: cursorSchema,
@@ -188,7 +188,7 @@ export function registerScrape(host: ToolHost, deps: ServerDeps): void {
                 .strict(),
         },
         async (args, ctx) =>
-            guard(deps, 'steel_scrape', ctx.mcpReq, async () => {
+            guard(deps, 'browser_scrape', ctx.mcpReq, async () => {
                 const format = (args.format ?? ['markdown']) as ScrapeFormat[];
                 const response = await deps.api.scrape(
                     {
@@ -245,12 +245,12 @@ export function registerScrape(host: ToolHost, deps: ServerDeps): void {
 
 export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_screenshot',
+        'browser_screenshot',
         {
             title: 'Screenshot a web page',
             description:
                 'Capture a page image. URL captures are user-facing PNG artifacts; session captures are model-visible ' +
-                'JPEG evidence. Pixels are not action targets, so use steel_snapshot to click or type.',
+                'JPEG evidence. Pixels are not action targets, so use browser_snapshot to click or type.',
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
@@ -263,7 +263,10 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                         .boolean()
                         .optional()
                         .describe('Capture the whole scrollable page, not just the viewport.'),
-                    use_proxy: z.boolean().optional().describe('Use a Steel residential proxy for a URL capture.'),
+                    use_proxy: z
+                        .boolean()
+                        .optional()
+                        .describe('Request an additional provider-managed proxy when this deployment supports it.'),
                     inline: z
                         .boolean()
                         .optional()
@@ -285,7 +288,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
             // a handle and marks it as used; screenshotting in a loop must not let the reaper
             // reclaim the session out from under the agent doing it.
             if (args.session_id) {
-                return withPage(deps, 'steel_screenshot', ctx.mcpReq, args.session_id, async page => {
+                return withPage(deps, 'browser_screenshot', ctx.mcpReq, args.session_id, async page => {
                     const shot = await page.captureScreenshot({ fullPage: args.full_page ?? false });
                     return successResult(
                         { result: 'Captured the current page of this session as a JPEG.' },
@@ -295,7 +298,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                 });
             }
 
-            return guard(deps, 'steel_screenshot', ctx.mcpReq, async () => {
+            return guard(deps, 'browser_screenshot', ctx.mcpReq, async () => {
                 const url = args.url as string;
 
                 const artifact = await deps.api.screenshot(
@@ -343,23 +346,26 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
 
 export function registerPdf(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
-        'steel_pdf',
+        'browser_pdf',
         {
             title: 'Render a web page as PDF',
             description:
-                'Render a page to PDF and return a link to the file. Starts no browser session. Use steel_scrape ' +
+                'Render a page to PDF and return a link to the file. Starts no browser session. Use browser_scrape ' +
                 'if you want to read the text — the PDF link is for handing a document to a person.',
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
                     url: z.url().describe('The page to render.'),
                     delay_ms: z.number().int().min(0).max(30_000).optional().describe('Wait this long after load.'),
-                    use_proxy: z.boolean().optional().describe('Use a Steel residential proxy.'),
+                    use_proxy: z
+                        .boolean()
+                        .optional()
+                        .describe('Request an additional provider-managed proxy when this deployment supports it.'),
                 })
                 .strict(),
         },
         async (args, ctx) =>
-            guard(deps, 'steel_pdf', ctx.mcpReq, async () => {
+            guard(deps, 'browser_pdf', ctx.mcpReq, async () => {
                 const artifact = await deps.api.pdf(
                     { url: args.url, delay: args.delay_ms, useProxy: args.use_proxy },
                     ctx.mcpReq.signal

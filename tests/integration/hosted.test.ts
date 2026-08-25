@@ -47,14 +47,17 @@ function toolCall(
     credential: string,
     name: string,
     args: Record<string, unknown>,
-    host = '127.0.0.1'
+    host = '127.0.0.1',
+    credentialHeader: 'authorization' | 'x-api-key' = 'authorization'
 ): Promise<RawResponse> {
+    const credentialHeaders: Record<string, string> =
+        credentialHeader === 'authorization' ? { authorization: `Bearer ${credential}` } : { 'x-api-key': credential };
     return raw(port, {
         method: 'POST',
         path: '/mcp',
         headers: {
             host,
-            authorization: `Bearer ${credential}`,
+            ...credentialHeaders,
             accept: 'application/json',
             'content-type': 'application/json',
             'mcp-protocol-version': MODERN_PROTOCOL_VERSION,
@@ -101,7 +104,7 @@ describe('the hosted entrypoint', () => {
     it('serves a tool call over a real socket, using the credential the caller sent', async () => {
         const { server, api } = await start();
 
-        const response = await toolCall(server.port, 'ste-caller', 'steel_scrape', { url: 'https://example.com/' });
+        const response = await toolCall(server.port, 'ste-caller', 'browser_scrape', { url: 'https://example.com/' });
 
         expect(response.status).toBe(200);
         const body = JSON.parse(response.body) as { result: { isError?: boolean } };
@@ -112,7 +115,7 @@ describe('the hosted entrypoint', () => {
     it('rejects a Host outside the allowlist, which is the DNS-rebinding guard', async () => {
         const { server } = await start();
 
-        const response = await toolCall(server.port, 'ste-caller', 'steel_scrape', {}, 'evil.test');
+        const response = await toolCall(server.port, 'ste-caller', 'browser_scrape', {}, 'evil.test');
 
         expect(response.status).toBe(403);
     });
@@ -140,16 +143,31 @@ describe('the hosted entrypoint', () => {
         ).rejects.toThrow(/STEEL_ALLOWED_HOSTS/);
     });
 
-    it('refuses to start pointed at a self-hosted browser, which has no per-caller credential', async () => {
-        await expect(startHostedServer({ env: { ...BASE_ENV, STEEL_LOCAL: 'true' }, log: () => {} })).rejects.toThrow(
-            /self-hosted/i
+    it('uses X-Api-Key as tenant identity while serving a self-hosted browser', async () => {
+        const { server, api } = await start({
+            STEEL_LOCAL: 'true',
+            STEEL_BASE_URL: 'http://steel-browser:3000',
+        });
+
+        const response = await toolCall(
+            server.port,
+            'moon-secret',
+            'browser_scrape',
+            { url: 'https://example.com/' },
+            '127.0.0.1',
+            'x-api-key'
         );
+
+        expect(response.status).toBe(200);
+        const body = JSON.parse(response.body) as { result: { isError?: boolean } };
+        expect(body.result.isError ?? false).toBe(false);
+        expect(api.scrapes).toHaveLength(1);
     });
 
     it('releases every browser it started when it shuts down', async () => {
         const { server, api } = await start();
 
-        const created = await toolCall(server.port, 'ste-caller', 'steel_session_create', {});
+        const created = await toolCall(server.port, 'ste-caller', 'browser_session_create', {});
         expect(created.status).toBe(200);
         expect(api.created).toHaveLength(1);
         const steelSessionId = api.created[0]?.sessionId as string;

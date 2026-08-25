@@ -382,7 +382,7 @@ describe('BrowserPage.act — click', () => {
         const error = await catchAsync(browserPage.act({ action: 'click', target: '@e1' }));
 
         expect(error.code).toBe('click_blocked');
-        expect(error.message).toMatch(/steel_find|steel_snapshot/);
+        expect(error.message).toMatch(/browser_find|browser_snapshot/);
         expect(error.message).not.toContain('DOM.getNodeForLocation');
         expect(error.details).toMatchObject({
             reason: 'no_node_at_location',
@@ -503,7 +503,7 @@ describe('BrowserPage.act — click', () => {
         const browserPage = await openPage(fixture);
         const error = await catchAsync(browserPage.act({ action: 'click', target: '@e1' }));
         expect(error.code).toBe('ref_not_found');
-        expect(error.message).toMatch(/steel_snapshot|steel_find/);
+        expect(error.message).toMatch(/browser_snapshot|browser_find/);
     });
 });
 

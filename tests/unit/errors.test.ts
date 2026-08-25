@@ -444,7 +444,7 @@ describe('staleRefError', () => {
         expect(err.message).toContain('s3');
         expect(err.message).toContain('s5');
         expect(err.message).toMatch(/page navigated/i);
-        expect(err.message).toMatch(/steel_find|steel_snapshot/);
+        expect(err.message).toMatch(/browser_find|browser_snapshot/);
     });
 });
 
@@ -454,7 +454,7 @@ describe('clickBlockedError', () => {
         expect(err.code).toBe('click_blocked');
         expect(err.message).toContain('div#consent-banner');
         expect(err.message).toMatch(/dismiss_overlays/);
-        expect(err.message).toMatch(/steel_find|steel_snapshot/);
+        expect(err.message).toMatch(/browser_find|browser_snapshot/);
         expect(err.message).toMatch(/retry once/i);
         expect(err.message).toMatch(/session_handoff.*repeating the same loop/i);
 
@@ -471,7 +471,7 @@ describe('selfHostUnsupportedError', () => {
         const err = selfHostUnsupportedError('concurrency');
         expect(err.code).toBe('self_host_unsupported');
         expect(err.message).toMatch(/one browser session at a time/i);
-        expect(err.message).toMatch(/steel_session_release/);
+        expect(err.message).toMatch(/browser_session_release/);
     });
 
     it('names each missing cloud capability instead of failing opaquely', () => {

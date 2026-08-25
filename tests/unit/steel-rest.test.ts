@@ -218,7 +218,7 @@ describe('SteelRestClient trace propagation', () => {
         const harness = tracingHarness();
         const { api, calls } = client([{ body: { content: {}, links: [], metadata: {} } }], undefined, harness.tracer);
 
-        await harness.tracer.startActiveSpan('tools/call steel_scrape', async span => {
+        await harness.tracer.startActiveSpan('tools/call browser_scrape', async span => {
             await api.scrape({ url: 'https://example.com', format: ['markdown'] });
             span.end();
         });
@@ -226,7 +226,7 @@ describe('SteelRestClient trace propagation', () => {
         const clientSpan = harness.span('steel browser_tool');
         const { traceId, spanId } = clientSpan.spanContext();
         expect(calls[0]!.headers.traceparent).toBe(`00-${traceId}-${spanId}-01`);
-        expect(clientSpan.parentSpanContext?.spanId).toBe(harness.span('tools/call steel_scrape').spanContext().spanId);
+        expect(clientSpan.parentSpanContext?.spanId).toBe(harness.span('tools/call browser_scrape').spanContext().spanId);
         await harness.shutdown();
     });
 

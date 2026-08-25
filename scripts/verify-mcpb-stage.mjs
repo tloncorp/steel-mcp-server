@@ -81,11 +81,11 @@ const tools = listed.result?.tools ?? [];
 if (tools.length !== EXPECTED_TOOL_COUNT) {
     fail(`expected ${EXPECTED_TOOL_COUNT} tools, the staged server listed ${tools.length}`);
 }
-const replay = tools.find(tool => tool.name === 'steel_session_replay');
-if (!replay) fail('the staged server omitted steel_session_replay from the fifteen-tool contract');
+const replay = tools.find(tool => tool.name === 'browser_session_replay');
+if (!replay) fail('the staged server omitted browser_session_replay from the fifteen-tool contract');
 if (replay._meta?.ui?.resourceUri) fail('dashboard-only replay unexpectedly declares an app resource');
-if (!tools.some(tool => tool.name === 'steel_session_handoff')) fail('the staged server omitted session handoff');
-const create = tools.find(tool => tool.name === 'steel_session_create');
+if (!tools.some(tool => tool.name === 'browser_session_handoff')) fail('the staged server omitted session handoff');
+const create = tools.find(tool => tool.name === 'browser_session_create');
 if (!create) fail('the staged server omitted session create');
 if (create.inputSchema?.properties?.region !== undefined) fail('session create still exposes infrastructure region');
 

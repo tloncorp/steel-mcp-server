@@ -137,7 +137,7 @@ specific regexes that require all of the following while retaining the security 
 3. Choose `timeout_ms` for the whole remaining active task and expected handoff. If a
    genuinely separate disposable comparison session is unavoidable, keep it cart-free
    and release it before the final cart session.
-4. Use `steel_batch` for the next few known reversible steps only when later targets do
+4. Use `browser_batch` for the next few known reversible steps only when later targets do
    not need a fresh read.
 5. On a batch boundary, hand off on the same session and resume with only unrun steps.
 6. A visible viewer is not a reservation; use explicit handoff when the person asked to
@@ -337,8 +337,8 @@ order, use this exact macOS install and verification path:
    `node scripts/verify-mcpb-stage.mjs "$candidate_unpack"` and the same command against
    `"$claude_steel_install"`.
 4. As part of this plan, extend `scripts/verify-mcpb-stage.mjs` so that the probe verifies
-   the initialized version, exactly 15 browse tools, `steel_session_handoff`, and the
-   absence of `region` from `steel_session_create.inputSchema.properties`. The tree
+   the initialized version, exactly 15 browse tools, `browser_session_handoff`, and the
+   absence of `region` from `browser_session_create.inputSchema.properties`. The tree
    packed-payload comparison proves the installed timeout/idle implementation is the
    tested candidate. Print only version, tool count and default durations, never
    configuration secrets or capability identifiers.
@@ -365,7 +365,7 @@ Acceptance observations:
   while dynamic targets that require a fresh read are not blindly batched;
 - blocked-control recovery stops after the bounded strategy rather than cycling through
   siblings indefinitely;
-- takeover invokes `steel_session_handoff`, not merely a viewer link;
+- takeover invokes `browser_session_handoff`, not merely a viewer link;
 - after Hand back, a fresh snapshot reads the same cart session;
 - session release is explicit when the test ends;
 - if Claude still reaches `tool_use_limit`, record it as host behavior and verify the
