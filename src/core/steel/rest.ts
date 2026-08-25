@@ -83,12 +83,26 @@ interface RequestSpec {
     responseType?: 'json' | 'text' | 'artifact' | undefined;
     /** Defaults to application/json; text endpoints can request their native media type. */
     accept?: string | undefined;
+    /** Endpoint contract used only when a binary response has no useful Content-Type. */
+    artifactMimeType?: 'image/jpeg' | 'application/pdf' | undefined;
     /** Statuses answered with `undefined` instead of an error, for idempotent operations. */
     tolerate?: number[] | undefined;
 }
 
 function dropUndefined(body: Record<string, unknown>): Record<string, unknown> {
     return Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined));
+}
+
+function artifactMimeType(bytes: Buffer, declared: string | undefined, fallback: string): string {
+    if (declared && declared !== 'application/octet-stream') return declared;
+    if (bytes.length >= 4 && bytes[0] === 0x89 && bytes.subarray(1, 4).equals(Buffer.from('PNG'))) {
+        return 'image/png';
+    }
+    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+        return 'image/jpeg';
+    }
+    if (bytes.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
+    return fallback;
 }
 
 async function readErrorBody(response: Response): Promise<SteelErrorBody> {
@@ -184,7 +198,7 @@ export class SteelRestClient implements SteelApi {
             return {
                 kind: 'inline',
                 data: bytes.toString('base64'),
-                mimeType: mimeType || 'application/octet-stream',
+                mimeType: artifactMimeType(bytes, mimeType, spec.artifactMimeType ?? 'application/octet-stream'),
                 size: bytes.byteLength,
             } as T;
         }
@@ -232,6 +246,7 @@ export class SteelRestClient implements SteelApi {
             signal,
             responseType: 'artifact',
             accept: 'application/json, image/png, image/jpeg',
+            artifactMimeType: 'image/jpeg',
             body: {
                 url: request.url,
                 fullPage: request.fullPage,
@@ -251,6 +266,7 @@ export class SteelRestClient implements SteelApi {
             signal,
             responseType: 'artifact',
             accept: 'application/json, application/pdf',
+            artifactMimeType: 'application/pdf',
             body: { url: request.url, delay: request.delay, useProxy: request.useProxy },
         });
         if (!result) throw new SteelToolError('Steel returned an empty body for /pdf.', { code: 'steel_error' });

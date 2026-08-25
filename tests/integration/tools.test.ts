@@ -376,9 +376,7 @@ describe('browser_screenshot and browser_pdf', () => {
             expect(link?.uri).toMatch(/^https:\/\//);
             expect(link?.size).toBe(png.byteLength);
             expect(textOf(result)).not.toContain('![');
-            expect((result as { structuredContent?: Record<string, unknown> }).structuredContent).toEqual({
-                url: link?.uri,
-            });
+            expect((result as { structuredContent?: Record<string, unknown> }).structuredContent).toBeUndefined();
         } finally {
             await h.close();
         }

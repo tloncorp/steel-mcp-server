@@ -120,8 +120,8 @@ describe('SteelRestClient artifact endpoints', () => {
     it('accepts raw screenshot and PDF bytes from the cluster browser', async () => {
         const { api } = client(
             [
-                { rawBody: 'JFIF-image', headers: { 'content-type': 'image/jpeg' } },
-                { rawBody: '%PDF-1.4', headers: { 'content-type': 'application/pdf' } },
+                { rawBody: 'JFIF-image', headers: { 'content-type': 'application/octet-stream' } },
+                { rawBody: '%PDF-1.4', headers: { 'content-type': 'application/octet-stream' } },
             ],
             { STEEL_BASE_URL: 'http://browser:3000' }
         );

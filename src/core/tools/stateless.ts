@@ -292,7 +292,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                     const shot = await page.captureScreenshot({ fullPage: args.full_page ?? false });
                     return successResult(
                         { result: 'Captured the current page of this session as a JPEG.' },
-                        { session_id: args.session_id },
+                        undefined,
                         [{ type: 'image', data: shot.data, mimeType: 'image/jpeg' }]
                     );
                 });
@@ -323,7 +323,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                                       ]
                                     : undefined,
                         },
-                        { source_url: url, mime_type: artifact.mimeType, size: artifact.size },
+                        undefined,
                         [
                             {
                                 type: 'image',
@@ -364,7 +364,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                                 : `Captured ${url}. The screenshot is linked below.`,
                         notes: fallbackNote ? [fallbackNote] : undefined,
                     },
-                    { url: artifact.url },
+                    undefined,
                     content
                 );
             });
@@ -418,7 +418,7 @@ export function registerPdf(host: ToolHost, deps: ServerDeps): void {
                     ];
                     return successResult(
                         { result: `Rendered ${args.url} to PDF. The PDF is attached.` },
-                        { source_url: args.url, mime_type: artifact.mimeType, size: artifact.size },
+                        undefined,
                         content
                     );
                 }
@@ -433,7 +433,7 @@ export function registerPdf(host: ToolHost, deps: ServerDeps): void {
                         annotations: { audience: ['user'] },
                     },
                 ];
-                return successResult({ result: `Rendered ${args.url} to PDF.` }, { url: artifact.url }, content);
+                return successResult({ result: `Rendered ${args.url} to PDF.` }, undefined, content);
             })
     );
 }
