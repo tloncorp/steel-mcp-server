@@ -156,7 +156,7 @@ export function registerSnapshot(host: ToolHost, deps: ServerDeps): void {
                         snapshot: sections.snapshot,
                         pagination: sections.pagination,
                     },
-                    { snapshot_id: snapshot?.snapshotId, url: snapshot?.url }
+                    undefined
                 );
             })
     );

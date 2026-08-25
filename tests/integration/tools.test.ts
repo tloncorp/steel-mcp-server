@@ -1021,6 +1021,7 @@ describe('browser_snapshot', () => {
         const text = textOf(result);
         expect(text).toContain('button "Save" @e');
         expect(text).toMatch(/snapshot [a-z]?\d+/i);
+        expect(result.structuredContent).toBeUndefined();
     });
 
     it('continues a truncated snapshot from its cursor even after the page changed', async () => {
