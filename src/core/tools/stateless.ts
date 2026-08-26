@@ -47,6 +47,14 @@ function artifactLink(artifact: PublishedArtifact, title: string, description: s
     };
 }
 
+function artifactHandoffNotes(artifact: PublishedArtifact): string[] {
+    return [
+        `The signed download URL expires at ${artifact.expiresAt}.`,
+        'To send this image in Tlon: call the tlon tool with command "upload <Download URL>". Copy the HTTPS URL it returns, then call the message tool with media set to that returned URL.',
+        'Uploading alone sends nothing. The MCP image attachment, resource link, tool-image filename, and a text reply containing a URL are not Tlon attachments; do not claim the image was sent until the message tool succeeds with media set.',
+    ];
+}
+
 type ArtifactDownload =
     | { state: 'embedded'; base64: string; size: number }
     | { state: 'link_only'; reason: 'download_failed' | 'http_error' | 'invalid_type' | 'too_large' };
@@ -280,7 +288,10 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
             title: 'Screenshot a web page',
             description:
                 'Capture a page image. URL captures are user-facing PNG artifacts; session captures are model-visible ' +
-                'JPEG evidence. Pixels are not action targets, so use browser_snapshot to click or type.',
+                'JPEG evidence. Pixels are not action targets, so use browser_snapshot to click or type. To send the ' +
+                'capture in Tlon, call the tlon tool with command "upload <Download URL>", copy the HTTPS URL it ' +
+                'returns, then call the message tool with media set to that returned URL. Uploading alone, quoting a ' +
+                'URL, or referring to tool-image.jpg does not attach it to a message.',
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
@@ -326,11 +337,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                             result: artifact
                                 ? `Captured the current page of this session as a JPEG. Download: ${artifact.url}`
                                 : 'Captured the current page of this session as a JPEG.',
-                            notes: artifact
-                                ? [
-                                      `The signed download URL expires at ${artifact.expiresAt}; pass it directly to an upload tool.`,
-                                  ]
-                                : undefined,
+                            notes: artifact ? artifactHandoffNotes(artifact) : undefined,
                         },
                         undefined,
                         [
@@ -387,9 +394,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                                 ? `Captured ${url}. Download: ${published.url}`
                                 : `Captured ${url}. The screenshot is attached inline.`,
                             notes: published
-                                ? [
-                                      `The signed download URL expires at ${published.expiresAt}; pass it directly to an upload tool.`,
-                                  ]
+                                ? artifactHandoffNotes(published)
                                 : inline === false
                                   ? [
                                         'Artifact hosting is not configured, so this self-hosted browser attached the image inline instead.',

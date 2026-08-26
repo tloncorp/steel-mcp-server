@@ -373,6 +373,11 @@ describe('browser_screenshot and browser_pdf', () => {
             })
         );
         try {
+            const tool = (await h.client.listTools()).tools.find(entry => entry.name === 'browser_screenshot');
+            expect(tool?.description).toMatch(/tlon tool with command "upload <Download URL>"/i);
+            expect(tool?.description).toMatch(/message tool with media set/i);
+            expect(tool?.description).toMatch(/does not attach it to a message/i);
+
             const result = await h.client.callTool({
                 name: 'browser_screenshot',
                 arguments: { url: 'https://example.com', inline: false },
@@ -383,6 +388,9 @@ describe('browser_screenshot and browser_pdf', () => {
                 'https://browser-session.test/artifacts/cap/screenshot.jpg'
             );
             expect(textOf(result)).toContain('https://browser-session.test/artifacts/cap/screenshot.jpg');
+            expect(textOf(result)).toMatch(/tlon tool with command "upload <Download URL>"/i);
+            expect(textOf(result)).toMatch(/message tool with media set/i);
+            expect(textOf(result)).toMatch(/do not claim the image was sent/i);
         } finally {
             await h.close();
         }
