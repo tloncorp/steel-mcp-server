@@ -1,6 +1,7 @@
 // ABOUTME: Test doubles injected at the Steel client and browser-pool boundaries, so the whole tool
 // ABOUTME: surface can be driven through a real MCP client without a network or a browser.
 import type { Tracer } from '@opentelemetry/api';
+import type { ArtifactPublisher } from '../../src/core/artifacts.js';
 import { loadConfig, type SteelConfig } from '../../src/core/config.js';
 import type { ServerDeps, SessionPool } from '../../src/core/context.js';
 import { createHandoffCodec } from '../../src/core/mrtr.js';
@@ -454,6 +455,7 @@ export interface TestDepsOptions {
     page?: () => FixturePage;
     tracer?: Tracer;
     artifactFetch?: typeof globalThis.fetch;
+    artifacts?: ArtifactPublisher;
     /**
      * Handle store to use instead of a fresh in-process one.
      *
@@ -501,6 +503,7 @@ export function testDeps(options: TestDepsOptions = {}): ServerDeps & {
         // Real time: the registry checks handle expiry against the real clock.
         now: () => new Date(),
         tracer: options.tracer,
+        artifacts: options.artifacts,
         artifactFetch:
             options.artifactFetch ??
             (async input => {

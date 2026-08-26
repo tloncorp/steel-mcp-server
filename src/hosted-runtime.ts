@@ -1,6 +1,7 @@
 // ABOUTME: Shared hosted dependency runtime that reuses Steel clients within one credential while
 // ABOUTME: isolating tenants, picking the handle store, and releasing through the owning principal's client.
 import type { RequestStateCodec } from '@modelcontextprotocol/server';
+import type { ArtifactPublisher } from './core/artifacts.js';
 import { loadRegistryConfig, type SteelConfig } from './core/config.js';
 import { CdpSessionPool, type ServerDeps, type SessionPool } from './core/context.js';
 import { createHandoffCodec, type HandoffState } from './core/mrtr.js';
@@ -34,6 +35,7 @@ export interface HostedRuntimeOptions {
     onReapError?: ((error: unknown) => void) | undefined;
     onReleased?: ((cause: ReleasePath, backend: 'memory' | 'redis') => void) | undefined;
     now?: (() => Date) | undefined;
+    artifacts?: ArtifactPublisher | undefined;
 }
 
 interface TenantClients {
@@ -137,6 +139,7 @@ export class HostedRuntime {
             principal: input.principal,
             settleMultiplier: tenant.settleMultiplier,
             now: this.now,
+            artifacts: this.options.artifacts,
         };
     };
 

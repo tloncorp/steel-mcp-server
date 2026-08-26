@@ -3,6 +3,7 @@
 // ABOUTME: HTTP server, and releases every browser it started before the replica goes away.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { toNodeHandler } from '@modelcontextprotocol/node';
+import { createHostedArtifactService } from './core/artifacts.js';
 import { loadConfig } from './core/config.js';
 import { REAPER_INTERVAL_MS, resolveRegistryIdleMs } from './core/lifecycle.js';
 import { recordSessionReleased, resolveTracer } from './core/telemetry.js';
@@ -90,6 +91,7 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
 
     // Started before the runtime so the tracer the core resolves is already the real one.
     const tracing = await startTracing(env, { onWarn: message => log('info', message) });
+    const artifacts = createHostedArtifactService(env);
 
     const backend = createHandleRegistryBackend({
         env,
@@ -112,6 +114,7 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
                 registryBackend,
             });
         },
+        artifacts,
         ...options.runtime,
     });
 
@@ -152,6 +155,18 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
         });
     });
 
+    let artifactPort: number | undefined;
+    try {
+        artifactPort = await artifacts?.listen();
+    } catch (error) {
+        await new Promise<void>(resolve => server.close(() => resolve()));
+        await artifacts?.close().catch(() => undefined);
+        await runtime.close().catch(() => undefined);
+        await backend.close().catch(() => undefined);
+        await tracing?.shutdown().catch(() => undefined);
+        throw error;
+    }
+
     const address = server.address();
     const boundPort = typeof address === 'object' && address !== null ? address.port : port;
     log('info', 'steel-mcp listening', {
@@ -162,6 +177,7 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
         baseUrl: template.baseUrl,
         handleStore: env.REDIS_URL ? 'shared' : 'in-process',
         server_version: SERVER_VERSION,
+        artifact_port: artifactPort,
     });
 
     let closed = false;
@@ -172,6 +188,9 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
             closed = true;
             clearInterval(reaper);
             await new Promise<void>(resolve => server.close(() => resolve()));
+            await artifacts?.close().catch(error => {
+                log('error', 'failed to close artifact service', { error: String(error) });
+            });
             await handler.close().catch(() => undefined);
             // Releases every browser this replica still holds, and closes its CDP pools. Steel's own
             // inactivity timeout is the layer underneath; this one reclaims the slot immediately.

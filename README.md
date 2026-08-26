@@ -250,11 +250,23 @@ a separate tenant and can consume shared capacity.
 | `REDIS_URL` | — | Shares handle records between replicas. Any replica can serve another's handle only when they also reach the same Steel backend; sidecar-local browser replicas need owner-aware routing too. Without Redis, records stay in the process — correct for exactly one replica |
 | `REDIS_KEY_PREFIX` | `steel-mcp` | Key namespace, so one store can hold more than one deployment |
 | `STEEL_REQUEST_STATE_SECRET` | per-process | HMAC key for human-in-the-loop handoff state. **Required with `REDIS_URL`**, and identical on every replica: without it a retried handoff lands on a replica that cannot verify state another one minted, after the person has already signed in. Generate with `openssl rand -base64 32` |
+| `BROWSER_ARTIFACT_PUBLIC_ORIGIN` | — | Enables short-lived download URLs for screenshots and PDFs at this public origin. The artifact listener is disabled when unset |
+| `BROWSER_ARTIFACT_SIGNING_KEY` | — | HMAC key for artifact capability URLs. Required when `BROWSER_ARTIFACT_PUBLIC_ORIGIN` is set; use at least 32 bytes |
+| `BROWSER_ARTIFACT_HOST` | `0.0.0.0` | Address for the dedicated artifact listener |
+| `BROWSER_ARTIFACT_PORT` | `8001` | Port for the dedicated artifact listener |
+| `BROWSER_ARTIFACT_TTL_MS` | `300000` | How long a screenshot or PDF URL remains usable |
+| `BROWSER_ARTIFACT_MAX_BYTES` | `5242880` | Maximum size of one hosted artifact |
+| `BROWSER_ARTIFACT_MAX_TOTAL_BYTES` | `67108864` | Bounded in-memory artifact budget; oldest entries are discarded first |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Any standard `OTEL_*` variable turns on OTLP tracing; `OTEL_SERVICE_NAME` defaults to `steel-mcp`. Unset means no exporter is loaded at all |
 
 The server never stores tenant credentials in handles or logs. A self-hosted deployment must
 terminate TLS in front of any non-cluster-local endpoint. Hosted logs are structured JSON on stdout,
 and credentials are redacted before anything reaches them.
+
+When artifact hosting is enabled, screenshot and PDF results include a signed HTTPS `resource_link`.
+The URL itself is the temporary capability: it contains no tenant credential, has no listing endpoint,
+and expires after `BROWSER_ARTIFACT_TTL_MS`. Keep the artifact listener private except for the
+`/artifacts` route exposed through TLS.
 
 `docker-compose.yaml` deploys that endpoint on any compose host, Coolify included:
 

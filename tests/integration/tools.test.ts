@@ -348,6 +348,46 @@ describe('browser_scrape', () => {
 });
 
 describe('browser_screenshot and browser_pdf', () => {
+    it('returns a hosted screenshot URL that another tool can fetch', async () => {
+        const api = new FakeSteelApi();
+        api.screenshot = async request => {
+            api.artifacts.push(request);
+            return {
+                kind: 'inline',
+                data: Buffer.from('jpeg-bytes').toString('base64'),
+                mimeType: 'image/jpeg',
+                size: 10,
+            };
+        };
+        const h = await connect(
+            testDeps({
+                api,
+                artifacts: {
+                    publish: async input => ({
+                        url: 'https://browser-session.test/artifacts/cap/screenshot.jpg',
+                        size: Buffer.from(input.data, 'base64').byteLength,
+                        mimeType: input.mimeType,
+                        expiresAt: '2026-08-26T22:00:00.000Z',
+                    }),
+                },
+            })
+        );
+        try {
+            const result = await h.client.callTool({
+                name: 'browser_screenshot',
+                arguments: { url: 'https://example.com', inline: false },
+            });
+            const content = (result as { content: Array<{ type: string; uri?: string }> }).content;
+            expect(content.some(block => block.type === 'image')).toBe(false);
+            expect(content.find(block => block.type === 'resource_link')?.uri).toBe(
+                'https://browser-session.test/artifacts/cap/screenshot.jpg'
+            );
+            expect(textOf(result)).toContain('https://browser-session.test/artifacts/cap/screenshot.jpg');
+        } finally {
+            await h.close();
+        }
+    });
+
     it('embeds a small PNG attachment exactly once and includes a fallback link', async () => {
         const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
         const h = await connect(

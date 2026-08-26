@@ -2,6 +2,7 @@
 // ABOUTME: session, so they carry no billing surprise and no way to leak one.
 import type { ContentBlock } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import type { PublishedArtifact } from '../artifacts.js';
 import type { ServerDeps, ToolHost } from '../context.js';
 import { botDetectionError, detectBotBlock, SteelToolError } from '../errors.js';
 import type { ScrapeFormat } from '../steel/types.js';
@@ -16,6 +17,35 @@ const MAX_METADATA_FIELDS = 25;
 const MAX_METADATA_VALUE_CHARS = 1_024;
 
 export const MAX_INLINE_SCREENSHOT_BYTES = 4 * 1024 * 1024;
+
+async function publishArtifact(
+    deps: ServerDeps,
+    data: string,
+    mimeType: string,
+    filename: string
+): Promise<PublishedArtifact | undefined> {
+    if (!deps.artifacts) return undefined;
+    try {
+        return await deps.artifacts.publish({ principal: deps.principal, data, mimeType, filename });
+    } catch {
+        // The original MCP attachment is still a valid result. Artifact hosting is an inter-tool
+        // convenience and must not turn a successful browser capture into a failed tool call.
+        return undefined;
+    }
+}
+
+function artifactLink(artifact: PublishedArtifact, title: string, description: string): ContentBlock {
+    return {
+        type: 'resource_link',
+        uri: artifact.url,
+        name: new URL(artifact.url).pathname.split('/').at(-1) ?? 'artifact',
+        title,
+        mimeType: artifact.mimeType,
+        size: artifact.size,
+        description,
+        annotations: { audience: ['user'] },
+    };
+}
 
 type ArtifactDownload =
     | { state: 'embedded'; base64: string; size: number }
@@ -290,10 +320,31 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
             if (args.session_id) {
                 return withPage(deps, 'browser_screenshot', ctx.mcpReq, args.session_id, async page => {
                     const shot = await page.captureScreenshot({ fullPage: args.full_page ?? false });
+                    const artifact = await publishArtifact(deps, shot.data, 'image/jpeg', 'session-screenshot.jpg');
                     return successResult(
-                        { result: 'Captured the current page of this session as a JPEG.' },
+                        {
+                            result: artifact
+                                ? `Captured the current page of this session as a JPEG. Download: ${artifact.url}`
+                                : 'Captured the current page of this session as a JPEG.',
+                            notes: artifact
+                                ? [
+                                      `The signed download URL expires at ${artifact.expiresAt}; pass it directly to an upload tool.`,
+                                  ]
+                                : undefined,
+                        },
                         undefined,
-                        [{ type: 'image', data: shot.data, mimeType: 'image/jpeg' }]
+                        [
+                            { type: 'image', data: shot.data, mimeType: 'image/jpeg' },
+                            ...(artifact
+                                ? [
+                                      artifactLink(
+                                          artifact,
+                                          'Session screenshot',
+                                          'Screenshot of the current browser session page'
+                                      ),
+                                  ]
+                                : []),
+                        ]
                     );
                 });
             }
@@ -313,25 +364,40 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                             { code: 'steel_error' }
                         );
                     }
+                    const published = await publishArtifact(
+                        deps,
+                        artifact.data,
+                        artifact.mimeType,
+                        artifact.mimeType === 'image/png' ? 'screenshot.png' : 'screenshot.jpg'
+                    );
+                    const includeImage = inline || !published;
+                    const content: ContentBlock[] = [];
+                    if (includeImage) {
+                        content.push({
+                            type: 'image',
+                            data: artifact.data,
+                            mimeType: artifact.mimeType,
+                            annotations: { audience: ['user'] },
+                        });
+                    }
+                    if (published) content.push(artifactLink(published, 'Page screenshot', `Screenshot of ${url}`));
                     return successResult(
                         {
-                            result: `Captured ${url}. The screenshot is attached inline.`,
-                            notes:
-                                inline === false
-                                    ? [
-                                          'This self-hosted browser returns screenshot bytes rather than a hosted link, so the image is attached inline.',
-                                      ]
-                                    : undefined,
+                            result: published
+                                ? `Captured ${url}. Download: ${published.url}`
+                                : `Captured ${url}. The screenshot is attached inline.`,
+                            notes: published
+                                ? [
+                                      `The signed download URL expires at ${published.expiresAt}; pass it directly to an upload tool.`,
+                                  ]
+                                : inline === false
+                                  ? [
+                                        'Artifact hosting is not configured, so this self-hosted browser attached the image inline instead.',
+                                    ]
+                                  : undefined,
                         },
                         undefined,
-                        [
-                            {
-                                type: 'image',
-                                data: artifact.data,
-                                mimeType: artifact.mimeType,
-                                annotations: { audience: ['user'] },
-                            },
-                        ]
+                        content
                     );
                 }
                 const downloaded = inline ? await downloadArtifact(deps, artifact.url, ctx.mcpReq.signal) : undefined;
@@ -405,19 +471,31 @@ export function registerPdf(host: ToolHost, deps: ServerDeps): void {
                             { code: 'steel_error' }
                         );
                     }
-                    const content: ContentBlock[] = [
-                        {
-                            type: 'resource',
-                            resource: {
-                                uri: 'browser-artifact:///page.pdf',
-                                blob: artifact.data,
-                                mimeType: artifact.mimeType,
-                            },
-                            annotations: { audience: ['user'] },
-                        },
-                    ];
+                    const published = await publishArtifact(deps, artifact.data, artifact.mimeType, 'page.pdf');
+                    const content: ContentBlock[] = published
+                        ? [artifactLink(published, 'Rendered page PDF', `PDF of ${args.url}`)]
+                        : [
+                              {
+                                  type: 'resource',
+                                  resource: {
+                                      uri: 'browser-artifact:///page.pdf',
+                                      blob: artifact.data,
+                                      mimeType: artifact.mimeType,
+                                  },
+                                  annotations: { audience: ['user'] },
+                              },
+                          ];
                     return successResult(
-                        { result: `Rendered ${args.url} to PDF. The PDF is attached.` },
+                        {
+                            result: published
+                                ? `Rendered ${args.url} to PDF. Download: ${published.url}`
+                                : `Rendered ${args.url} to PDF. The PDF is attached.`,
+                            notes: published
+                                ? [
+                                      `The signed download URL expires at ${published.expiresAt}; pass it directly to an upload tool.`,
+                                  ]
+                                : undefined,
+                        },
                         undefined,
                         content
                     );
