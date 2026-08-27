@@ -4,7 +4,7 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { SESSION_VIEWER_URI } from '../apps/session-viewer.js';
 import { resolveInactivityTimeout } from '../config.js';
-import { mintSteelSessionId, type ServerDeps, type ToolHost } from '../context.js';
+import { defaultSelfHostedProfileId, mintSteelSessionId, type ServerDeps, type ToolHost } from '../context.js';
 import { type SelfHostCapability, SteelToolError, selfHostUnsupportedError } from '../errors.js';
 import { supportsInlineViewer } from '../mrtr.js';
 import { DEFAULT_MAX_TOKENS, paginate } from '../pagination.js';
@@ -135,8 +135,10 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                     }
                 }
 
+                const selfHosted = deps.config.deployment === 'self_hosted';
+                const tenantSessionLimit = selfHosted ? 1 : deps.config.maxConcurrentSessions;
                 const live = await deps.registry.countLive(deps.principal);
-                if (live >= deps.config.maxConcurrentSessions) {
+                if (live >= tenantSessionLimit) {
                     throw deps.config.deployment === 'self_hosted'
                         ? selfHostUnsupportedError('concurrency')
                         : new (await import('../errors.js')).SteelToolError(
@@ -155,12 +157,14 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                 const inactivityTimeout = resolveInactivityTimeout(deps.config.inactivityTimeoutMs, timeout);
 
                 const steelSessionId = mintSteelSessionId(deps);
+                const persistentProfileId = selfHosted ? defaultSelfHostedProfileId(deps.principal) : args.profile_id;
+                const persistProfile = selfHosted || Boolean(settings.persistProfile);
                 const expiresAt = new Date(deps.now().getTime() + timeout);
                 let profileWriterReserved = false;
-                if (settings.persistProfile && args.profile_id) {
+                if (persistProfile && persistentProfileId) {
                     profileWriterReserved = await deps.registry.reserveProfileWriter(
                         deps.principal,
-                        args.profile_id,
+                        persistentProfileId,
                         steelSessionId,
                         expiresAt.getTime()
                     );
@@ -190,6 +194,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                             blockAds: args.block_ads,
                             deviceConfig: args.device ? { device: args.device } : settings.deviceConfig,
                             dimensions: args.viewport,
+                            ...(selfHosted ? { profileId: persistentProfileId, persist: true } : {}),
                         },
                         ctx.mcpReq.signal
                     );
@@ -198,9 +203,9 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                     // accepted the create can be reclaimed instead of becoming an unknown session.
                     await deps.pool.close(steelSessionId).catch(() => undefined);
                     await deps.api.releaseSession(steelSessionId).catch(() => undefined);
-                    if (profileWriterReserved && args.profile_id) {
+                    if (profileWriterReserved && persistentProfileId) {
                         await deps.registry
-                            .releaseProfileWriter(deps.principal, args.profile_id, steelSessionId)
+                            .releaseProfileWriter(deps.principal, persistentProfileId, steelSessionId)
                             .catch(() => undefined);
                     }
                     throw error;
@@ -219,19 +224,19 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                         // the player, and the dashboard would show them a sign-in page instead.
                         debugUrl: session.debugUrl,
                         mitigation: {
-                            profileId: session.profileId ?? args.profile_id,
+                            profileId: persistentProfileId ?? session.profileId,
                             useProxy: Boolean(args.use_proxy ?? settings.useProxy),
                             solveCaptcha: args.solve_captcha ?? settings.solveCaptcha,
                             managedCredentials: Boolean(args.namespace),
-                            persistProfile: settings.persistProfile,
+                            persistProfile: persistProfile || undefined,
                         },
                     });
                 } catch (error) {
                     await deps.pool.close(steelSessionId).catch(() => undefined);
                     await deps.api.releaseSession(steelSessionId).catch(() => undefined);
-                    if (profileWriterReserved && args.profile_id) {
+                    if (profileWriterReserved && persistentProfileId) {
                         await deps.registry
-                            .releaseProfileWriter(deps.principal, args.profile_id, steelSessionId)
+                            .releaseProfileWriter(deps.principal, persistentProfileId, steelSessionId)
                             .catch(() => undefined);
                     }
                     throw error;
@@ -275,11 +280,15 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                                       'Managed credential injection was requested; this does not prove the site authenticated. Verify the page. If sign-in remains, do not guess another namespace: use browser_session_options before creating a replacement, or hand off this session. Never request or type a password.',
                                   ]
                                 : []),
-                            ...(!args.profile_id && !args.namespace
+                            ...(selfHosted
                                 ? [
-                                      'No saved identity was requested, so this is a fresh guest browser. If the task needs a saved login, call browser_session_options before creating the session.',
+                                      'This credential has a durable browser profile. Login state is saved when the session closes; Chrome does not remain running between sessions.',
                                   ]
-                                : []),
+                                : !args.profile_id && !args.namespace
+                                  ? [
+                                        'No saved identity was requested, so this is a fresh guest browser. If the task needs a saved login, call browser_session_options before creating the session.',
+                                    ]
+                                  : []),
                         ],
                     },
                     {
@@ -297,10 +306,13 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                         files: { local_upload: 'inline_viewer', model_can_read_bytes: false },
                         plan_limits: {
                             max_session_ms: planMax,
-                            max_concurrent_sessions: details.concurrencyLimit ?? deps.config.maxConcurrentSessions,
+                            max_concurrent_sessions: selfHosted
+                                ? tenantSessionLimit
+                                : (details.concurrencyLimit ?? tenantSessionLimit),
                         },
-                        profile_id: session.profileId ?? args.profile_id,
-                        persist_profile: Boolean(settings.persistProfile),
+                        profile_id: selfHosted ? undefined : (session.profileId ?? args.profile_id),
+                        persist_profile: persistProfile,
+                        profile_scope: selfHosted ? 'credential' : undefined,
                         managed_credentials: {
                             requested: Boolean(args.namespace),
                             exact_origin: Boolean(args.namespace),
@@ -379,7 +391,9 @@ export function registerSessionRelease(host: ToolHost, deps: ServerDeps): void {
                             ...(record.viewerUrl ? [`Session dashboard: ${record.viewerUrl}`] : []),
                             ...(record.mitigation.persistProfile
                                 ? [
-                                      'Profile persistence was requested; it may remain UPLOADING before it becomes READY.',
+                                      deps.config.deployment === 'self_hosted'
+                                          ? 'Saved login state remains in this credential’s durable browser profile; no browser stays running.'
+                                          : 'Profile persistence was requested; it may remain UPLOADING before it becomes READY.',
                                   ]
                                 : []),
                         ],
@@ -389,8 +403,9 @@ export function registerSessionRelease(host: ToolHost, deps: ServerDeps): void {
                         released: true,
                         final_url: finalUrl,
                         title,
-                        profile_id: record.mitigation.profileId,
+                        profile_id: deps.config.deployment === 'self_hosted' ? undefined : record.mitigation.profileId,
                         persist_profile: Boolean(record.mitigation.persistProfile),
+                        profile_scope: deps.config.deployment === 'self_hosted' ? 'credential' : undefined,
                     }
                 );
             })

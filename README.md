@@ -190,9 +190,13 @@ For Claude Code, run this from the cloned `steel-mcp-server` directory:
 claude mcp add steel -e STEEL_LOCAL=true -- node "$PWD/dist/stdio.js"
 ```
 
-Self-hosted Steel runs one browser session at a time. It does not support Steel-managed proxies,
-browser profiles, managed credentials, or CAPTCHA solving. The server returns a specific explanation if a tool
-requests one of those cloud-only features.
+Self-hosted Steel runs one browser session at a time per credential. Each credential transparently
+selects one durable browser profile: releasing or idling a session closes Chrome, while cookies and
+other profile state are reused by the next session for that credential. Callers cannot select an
+arbitrary self-hosted profile ID. The profile root must be durable storage if login state must survive
+a Pod replacement. Self-hosted Steel does not support Steel-managed profiles, managed credentials,
+or CAPTCHA solving. The server returns a specific explanation if a tool requests one of those
+cloud-only features.
 
 ## Configuration
 

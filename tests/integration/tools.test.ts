@@ -809,6 +809,71 @@ describe('browser_session_create', () => {
         expect(created.timeout).toBeGreaterThan(0);
     });
 
+    it('reuses one durable self-hosted profile without keeping the old session alive', async () => {
+        const local = await connect(
+            testDeps({
+                env: {
+                    STEEL_LOCAL: 'true',
+                    STEEL_BASE_URL: 'http://steel-browser:3000',
+                    STEEL_MAX_SESSIONS: '4',
+                },
+            })
+        );
+        try {
+            const firstHandle = await newSession(local);
+            const first = local.deps.api.created[0]!;
+            expect(first.persist).toBe(true);
+            expect(first.profileId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+            const concurrent = await local.client.callTool({ name: 'browser_session_create', arguments: {} });
+            expect(isError(concurrent)).toBe(true);
+            expect(textOf(concurrent)).toMatch(/one browser session at a time/i);
+
+            await local.client.callTool({
+                name: 'browser_session_release',
+                arguments: { session_id: firstHandle },
+            });
+            await newSession(local);
+
+            expect(local.deps.api.created[1]!.sessionId).not.toBe(first.sessionId);
+            expect(local.deps.api.created[1]!.profileId).toBe(first.profileId);
+            expect(local.deps.api.created[1]!.persist).toBe(true);
+        } finally {
+            await local.close();
+        }
+    });
+
+    it('plans a self-hosted account login as a handoff into the automatic credential profile', async () => {
+        const local = await connect(
+            testDeps({
+                env: {
+                    STEEL_LOCAL: 'true',
+                    STEEL_BASE_URL: 'http://steel-browser:3000',
+                },
+            })
+        );
+        try {
+            const options = await local.client.callTool({
+                name: 'browser_session_options',
+                arguments: {
+                    url: 'https://example.com/login',
+                    goal: 'account',
+                    needs: ['persist_profile'],
+                },
+            });
+            expect(isError(options)).toBe(false);
+            expect(options.structuredContent).toMatchObject({
+                viable: true,
+                recommended_tool: 'browser_session_create',
+                profile_scope: 'credential',
+                unresolved: [],
+            });
+            expect(textOf(options)).toMatch(/handoff.*saved automatically/i);
+        } finally {
+            await local.close();
+        }
+    });
+
     it('starts a genuine mobile browser when mobile device mode is requested', async () => {
         const result = await harness.client.callTool({
             name: 'browser_session_create',

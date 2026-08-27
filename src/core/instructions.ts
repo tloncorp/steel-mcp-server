@@ -11,7 +11,7 @@ export const SERVER_INSTRUCTIONS = `Use this browser for JavaScript pages, block
 
 Start with browser_scrape while it supplies the evidence; it starts no browser session. At the first necessary interaction, create one session for the remaining task and handoff, then preserve it through comparison and cart. expires_at is immutable and replacement sessions do not inherit page/cart state. Release promptly.
 
-For saved login/profile/credentials or other setup, call browser_session_options for the target; pass its configuration to create. Never guess profile_id/namespace.
+Self-hosted sessions reuse this credential's login profile. For selectable cloud profiles or managed credentials, call browser_session_options; never guess profile_id/namespace.
 
 Use the returned session_id with browser_navigate, browser_snapshot, browser_find and browser_act. Read before acting and target @eN refs; elements without one cannot be clicked. After no change, take a fresh snapshot instead of repeating.
 

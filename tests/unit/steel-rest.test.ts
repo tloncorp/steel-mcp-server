@@ -191,6 +191,13 @@ describe('SteelRestClient.createSession', () => {
         await api.createSession({ sessionId: 'mine-1', timeout: 1000, inactivityTimeout: 500 });
         expect(Object.keys(calls[0]!.body as object).sort()).toEqual(['inactivityTimeout', 'sessionId', 'timeout']);
     });
+
+    it('passes the stable profile selector and persistence flag to a self-hosted browser', async () => {
+        const profileId = 'aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa';
+        const { api, calls } = client([{ body: { id: 'mine-1', status: 'live' } }]);
+        await api.createSession({ sessionId: 'mine-1', timeout: 900_000, profileId, persist: true });
+        expect(calls[0]!.body).toMatchObject({ profileId, persist: true });
+    });
 });
 
 describe('SteelRestClient.releaseSession', () => {

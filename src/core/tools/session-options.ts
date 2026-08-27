@@ -121,11 +121,7 @@ export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
                 const origin = targetOrigin(args.url);
                 const needs = (args.needs ?? []) as SessionNeed[];
                 const warnings: Array<{ code: string; message: string }> = [];
-                if (
-                    deps.config.deployment === 'self_hosted' &&
-                    (args.goal === 'account' ||
-                        needs.some(n => ['protected_text', 'human_captcha', 'persist_profile', 'location'].includes(n)))
-                ) {
+                if (deps.config.deployment === 'self_hosted' && needs.includes('location')) {
                     const result = {
                         viable: false,
                         target_origin: origin,
@@ -141,7 +137,7 @@ export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
                         warnings: [
                             {
                                 code: 'self_hosted_unsupported',
-                                message: 'This setup needs account capabilities unavailable in this browser deployment.',
+                                message: 'This deployment cannot select a different proxy location per session.',
                             },
                         ],
                         unresolved: [],
@@ -172,6 +168,60 @@ export function registerSessionOptions(host: ToolHost, deps: ServerDeps): void {
                     configuredTimeoutMs: deps.config.sessionTimeoutMs,
                     accountMaxMs: details.maxSessionDuration,
                 });
+                if (deps.config.deployment === 'self_hosted') {
+                    const createTemplate: { configuration?: string } = {};
+                    if (recipe.state)
+                        createTemplate.configuration = await deps.sessionPlanState.mint(recipe.state, ctx);
+                    const timeout = recipe.state?.settings.timeout ?? deps.config.sessionTimeoutMs;
+                    const result = {
+                        viable: true,
+                        target_origin: origin,
+                        recommended_tool: recipe.recommendedTool,
+                        ...(recipe.recommendedTool === 'browser_scrape'
+                            ? { scrape_arguments: { url: args.url } }
+                            : { create_template: createTemplate }),
+                        effective_defaults: {
+                            headless: false,
+                            interactive_viewer: true,
+                            timeout_ms: timeout,
+                            inactivity_timeout_ms:
+                                resolveInactivityTimeout(deps.config.inactivityTimeoutMs, timeout) ?? null,
+                        },
+                        applied_settings: {
+                            ...(recipe.state?.settings ?? {}),
+                            persistProfile: true,
+                            profileScope: 'credential',
+                        },
+                        rationale: [
+                            ...recipe.rationale,
+                            'This credential automatically reuses one durable browser profile without keeping Chrome running.',
+                        ],
+                        warnings: [
+                            ...recipe.warnings,
+                            ...(needs.includes('human_captcha')
+                                ? [
+                                      {
+                                          code: 'manual_handoff_required',
+                                          message: 'CAPTCHA completion requires browser_session_handoff.',
+                                      },
+                                  ]
+                                : []),
+                        ],
+                        unresolved: [],
+                        profiles: [],
+                        credentials: [],
+                        profile_scope: 'credential',
+                    };
+                    return successResult(
+                        {
+                            result:
+                                recipe.recommendedTool === 'browser_scrape'
+                                    ? `${recipe.recommendedTool} is recommended for ${origin}.`
+                                    : `Start the session and use browser_session_handoff if ${origin} needs login; this credential's profile is saved automatically.`,
+                        },
+                        result
+                    );
+                }
                 let profiles: SteelProfileSummary[] = [];
                 let credentials: SteelCredentialSummary[] = [];
                 if (args.goal === 'account') {

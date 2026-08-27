@@ -1,6 +1,6 @@
 // ABOUTME: The dependency bundle and registration surface every tool closes over, and the browser-pool
 // ABOUTME: contract that keeps one attached CDP page per Steel session so refs survive across calls.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { McpServer, RequestStateCodec } from '@modelcontextprotocol/server';
 import type { Tracer } from '@opentelemetry/api';
 import type { ArtifactPublisher } from './artifacts.js';
@@ -82,6 +82,15 @@ export interface ServerDeps {
 /** Mints the session UUID before the create call, closing the create-then-crash gap. */
 export function mintSteelSessionId(deps: ServerDeps): string {
     return (deps.newSessionId ?? randomUUID)();
+}
+
+/** Stable, non-secret UUID used only to select this principal's self-hosted Chrome profile. */
+export function defaultSelfHostedProfileId(principal: string): string {
+    const bytes = createHash('sha256').update('tlon:self-hosted-browser-profile:v1\0').update(principal).digest();
+    bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = bytes.subarray(0, 16).toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** The connection behaviour the pool depends on, so tests can supply one without a socket. */

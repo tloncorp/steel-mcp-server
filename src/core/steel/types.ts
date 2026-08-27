@@ -68,6 +68,8 @@ export interface CreateSessionRequest {
     optimizeBandwidth?: { blockImages: true; blockMedia: true; blockStylesheets: false } | undefined;
     profileId?: string | undefined;
     persistProfile?: true | undefined;
+    /** Self-hosted steel-browser persistence flag; Steel Cloud uses persistProfile instead. */
+    persist?: true | undefined;
     namespace?: string | undefined;
     credentials?: {
         autoSubmit: boolean;
