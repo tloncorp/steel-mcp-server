@@ -27,6 +27,8 @@ export interface SteelConfig {
     connectUrl: string;
     deployment: Deployment;
     profile: ProfileName;
+    /** Operator-owned inference credentials, never the caller's browser tenant key. */
+    jev?: { apiKey: string; model: string };
     /**
      * Hard cap on simultaneous browser sessions. Self-hosted steel-browser runs exactly one;
      * the cloud value is refined from `GET /v1/details` at runtime.
@@ -148,6 +150,9 @@ export function loadConfig(env: Record<string, string | undefined>): SteelConfig
         connectUrl: env.STEEL_CONNECT_URL ?? (deployment === 'cloud' ? CLOUD_CONNECT_URL : toWebSocketUrl(baseUrl)),
         deployment,
         profile: profileName as ProfileName,
+        jev: env.OPENROUTER_API_KEY?.trim()
+            ? { apiKey: env.OPENROUTER_API_KEY.trim(), model: env.BROWSER_JEV_MODEL?.trim() || '~typesafe/jev-latest' }
+            : undefined,
         maxConcurrentSessions: parseIntEnv(env.STEEL_MAX_SESSIONS, deployment === 'self_hosted' ? 1 : 10),
         inactivityTimeoutMs: parseIntEnv(env.STEEL_INACTIVITY_TIMEOUT_MS, DEFAULT_INACTIVITY_TIMEOUT_MS),
         sessionTimeoutMs: parseIntEnv(env.STEEL_SESSION_TIMEOUT_MS, DEFAULT_SESSION_TIMEOUT_MS),
@@ -180,6 +185,11 @@ const DEFAULT_REGISTRY_KEY_PREFIX = 'steel-mcp';
 export function loadRegistryConfig(env: Record<string, string | undefined>): RegistryConfig {
     const redisUrl = env.REDIS_URL?.trim() || undefined;
     if (redisUrl !== undefined) {
+        if (env.OPENROUTER_API_KEY?.trim()) {
+            throw new Error(
+                'Jev browser runs require a single MCP replica with the in-memory registry; unset REDIS_URL or OPENROUTER_API_KEY.'
+            );
+        }
         const protocol = URL.canParse(redisUrl) ? new URL(redisUrl).protocol : undefined;
         if (protocol !== 'redis:' && protocol !== 'rediss:') {
             throw new Error(

@@ -5,7 +5,8 @@ import { SESSION_VIEWER_HTML, SESSION_VIEWER_MIME_TYPE, SESSION_VIEWER_URI } fro
 import type { SteelConfig } from './config.js';
 import type { ServerDeps, ToolHost } from './context.js';
 import { toolErrorResult } from './errors.js';
-import { SERVER_INSTRUCTIONS } from './instructions.js';
+import { JEV_INSTRUCTIONS, SERVER_INSTRUCTIONS } from './instructions.js';
+import { operationHost } from './operation-lock.js';
 import { toolsForProfile } from './profiles.js';
 import type { RateLimiter } from './rate-limit.js';
 import { SERVER_VERSION } from './version.js';
@@ -102,6 +103,11 @@ function meteredHost(server: McpServer, limiter: RateLimiter, principal: string)
  * cheap: everything expensive lives in `deps`, created once at module scope and closed over here.
  */
 export function createSteelMcpServer(deps: ServerDeps): McpServer {
+    if (deps.config.jev && deps.registry.registryBackend !== 'memory') {
+        throw new Error(
+            'browser_run requires a process-owned session registry; distributed execution leases are not configured.'
+        );
+    }
     const server = new McpServer(
         { name: 'browser', title: 'Browser', version: SERVER_VERSION },
         {
@@ -113,7 +119,7 @@ export function createSteelMcpServer(deps: ServerDeps): McpServer {
                 resources: { listChanged: false },
                 extensions: { [UI_EXTENSION_NAME]: {} },
             },
-            instructions: SERVER_INSTRUCTIONS,
+            instructions: deps.config.jev && deps.config.profile === 'browse' ? JEV_INSTRUCTIONS : SERVER_INSTRUCTIONS,
             cacheHints: {
                 // The tool list depends on the profile, not on who is asking.
                 'tools/list': { ttlMs: PUBLIC_CACHE_TTL_MS, cacheScope: 'public' },
@@ -130,8 +136,9 @@ export function createSteelMcpServer(deps: ServerDeps): McpServer {
 
     registerSessionViewer(server, deps.config);
 
-    const host = deps.limiter ? meteredHost(server, deps.limiter, deps.principal) : server;
-    for (const tool of toolsForProfile(deps.config.profile)) {
+    const metered = deps.limiter ? meteredHost(server, deps.limiter, deps.principal) : server;
+    const host = deps.config.jev ? operationHost(metered, deps) : metered;
+    for (const tool of toolsForProfile(deps.config.profile, Boolean(deps.config.jev))) {
         tool.register(host, deps);
     }
 

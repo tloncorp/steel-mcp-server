@@ -4,6 +4,9 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 
 /** Stable machine-readable classification carried alongside every error message. */
 export type SteelErrorCode =
+    | 'jev_unavailable'
+    | 'jev_invalid_response'
+    | 'session_busy'
     | 'payment_required'
     | 'rate_limited'
     | 'unauthorized'

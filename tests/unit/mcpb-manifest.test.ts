@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { TOOL_TABLE } from '../../src/core/profiles.js';
+import { toolsForProfile } from '../../src/core/profiles.js';
 import { SERVER_VERSION } from '../../src/core/version.js';
 
 const root = new URL('../../', import.meta.url);
@@ -188,10 +188,8 @@ describe('the pack script', () => {
 });
 
 describe('the manifest tool list', () => {
-    it('lists exactly the tools the server registers, in the same order', () => {
-        // TOOL_TABLE is the single source tools/list is built from, so matching it is matching the
-        // wire. A manifest promising a tool that does not exist fails compatibility review.
-        expect(bundle.tools?.map(tool => tool.name)).toEqual(TOOL_TABLE.map(tool => tool.name));
+    it('lists exactly the default tools without optional inference credentials, in the same order', () => {
+        expect(bundle.tools?.map(tool => tool.name)).toEqual(toolsForProfile('browse').map(tool => tool.name));
     });
 
     it('describes every tool it lists', () => {

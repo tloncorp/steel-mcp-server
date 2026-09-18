@@ -43,6 +43,8 @@ export interface RateLimiter {
  *   would keep a browser billing while its owner waited out a budget.
  */
 export const TOOL_COSTS: Readonly<Record<string, number>> = {
+    // Charged on admission and once per inference step.
+    browser_run: 1,
     browser_session_create: 10,
     browser_batch: 6,
     browser_navigate: 3,

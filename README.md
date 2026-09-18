@@ -53,6 +53,58 @@ The default `browse` profile is sixteen tools:
 Set `STEEL_PROFILE=scrape` to expose only the three stateless read tools. They never start a browser
 session. The default `browse` profile adds the thirteen session tools above.
 
+### Jev browser runs through OpenRouter
+
+Set `OPENROUTER_API_KEY` in the **MCP container** to expose `browser_run` and
+enable Jev-first instructions for multi-step browsing. No TypeSafe account or
+extra browser container is needed. `BROWSER_JEV_MODEL` defaults to
+`~typesafe/jev-latest` (including the tilde); set it to pin an OpenRouter Jev model.
+The inference key belongs in the operator's secret configuration, not the moon's
+MCP upstream headers. The moon's `X-Api-Key` continues to identify its browser tenant.
+Without an OpenRouter key, the ordinary browser tools remain available.
+
+Create a session, navigate to the starting page, then call:
+
+```json
+{
+  "name": "browser_run",
+  "arguments": {
+    "session_id": "sess_...",
+    "task": "Search for espresso and open the matching article",
+    "inputs": [{ "field": "Search", "value": "espresso" }],
+    "max_steps": 12,
+    "max_seconds": 60
+  }
+}
+```
+
+The runner uses the same authenticated session, saved profile, proxy and viewer
+as the other browser tools. It neither creates nor closes a browser. Jev chooses
+actions from a bounded snapshot; typing uses only supplied non-secret strings
+and does not press Enter. Missing inputs, unsupported controls, uncertain decisions,
+page changes and confirmation boundaries return control to the main agent on the
+same session. Password/OTP forms and challenges stop for human handoff. Ordinary
+browser tools handle steps requiring more judgment. Completion is a model judgment;
+verify the returned evidence before reporting success.
+
+Each call returns its stop status, action trace, provider-reported usage and final
+bounded page evidence when available. Step and time budgets bound the loop; an
+already-dispatched browser operation may finish after cancellation, but no new
+action is dispatched after the run observes it. Unknown provider responses fail
+without executing an action, and provider error bodies are not returned.
+
+Jev runs require **one MCP replica with the in-memory registry**. `REDIS_URL`
+together with an inference key is rejected because distributed execution leases
+are not configured. In-process session calls are serialized, and each step
+rechecks ownership, expiry and human control. The runner charges the tenant's
+request budget for each inference call as well as admission.
+
+Page labels and text excerpts, the task and supplied inputs are sent to OpenRouter
+and its TypeSafe provider. Existing input values, tenant headers, browser cookies
+and viewer capabilities are not included by the runner. Do not supply credentials
+or other secrets in tasks or inputs. Page content is untrusted; classification and
+label checks are conservative stop conditions, not proof that a website is safe.
+
 ### Saved identity and non-default sessions
 
 Call `browser_session_options` with an absolute target URL, a `read`, `interact`, or `account` goal,
@@ -408,8 +460,10 @@ the tool you called and the error text. For anything security-related, follow
 
 The server holds no data of its own. It sends the URLs and page interactions a tool call names to
 [Steel](https://steel.dev), which runs the browser, and returns what the page said. Page content
-passes through to your MCP client and is not stored, logged, or forwarded anywhere else; passwords
-and credentials are redacted before anything reaches a log. Nothing about your conversation is
+passes through to your MCP client. When Jev is configured, `browser_run` also sends
+bounded page evidence, its task and explicitly supplied inputs to OpenRouter and
+TypeSafe for inference. Password fields and existing field values are excluded
+from that evidence. Nothing else about your conversation is
 collected, and no telemetry exporter is loaded unless you configure one with a standard `OTEL_*`
 variable.
 
