@@ -29,7 +29,15 @@ export function runEvidence(snapshot: PageSnapshot): string {
     return snapshot.nodes
         .filter(node => !node.sensitive)
         .slice(0, 160)
-        .map(node => `${node.ref ?? '-'} ${node.role} ${node.name.slice(0, 180)}`)
+        .map(node => {
+            const state = ['selected', 'disabled', 'checked', 'expanded', 'pressed', 'readonly']
+                .flatMap(key => {
+                    const value = node.properties?.[key];
+                    return typeof value === 'boolean' || value === 'mixed' ? [`[${key}=${value}]`] : [];
+                })
+                .join(' ');
+            return `${node.ref ?? '-'} ${node.role} ${node.name.slice(0, 600)}${state ? ` ${state}` : ''}${node.activation === 'keyboard' ? ' [activation=keyboard]' : ''}${node.inViewport ? '' : ' [off-screen]'}`;
+        })
         .join('\n')
         .slice(0, 12_000);
 }
@@ -39,7 +47,9 @@ export function runCandidates(snapshot: PageSnapshot, inputs: RunInput[]): Map<s
     for (const node of snapshot.nodes) {
         if (!node.ref || !node.interactive || node.sensitive || candidates.size >= 220) continue;
         const role = node.role.toLowerCase();
-        const label = `${node.role} ${node.name.slice(0, 160)}`;
+        if (node.properties?.disabled === true) continue;
+        if (role === 'tab' && node.properties?.selected === true) continue;
+        const label = `${node.role} ${node.name.slice(0, 600)}`;
         if (role === 'textbox' || role === 'searchbox') {
             for (const [index, input] of inputs.entries()) {
                 if (!node.name.toLowerCase().includes(input.field.toLowerCase()) || candidates.size >= 220) continue;

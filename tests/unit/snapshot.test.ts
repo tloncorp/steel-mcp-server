@@ -52,6 +52,46 @@ describe('PageState.capture — which nodes earn a ref', () => {
         expect(snapshot.nodes.find(node => node.role === 'button')?.ref).toBeUndefined();
     });
 
+    it('gives visible focusable pointer-disabled links an explicit keyboard ref', async () => {
+        const { session } = fixtureSession(
+            page([
+                {
+                    ...BUTTON,
+                    tag: 'DIV',
+                    role: 'link',
+                    name: 'Select flight',
+                    pointerEvents: 'none',
+                    properties: { focusable: true },
+                },
+            ])
+        );
+        const snapshot = await new PageState().capture(session, {});
+        expect(snapshot.nodes.find(node => node.role === 'link')).toMatchObject({
+            ref: '@e1',
+            activation: 'keyboard',
+            interactive: true,
+        });
+        expect(snapshot.text).toContain('[activation=keyboard]');
+    });
+
+    it('keeps hidden and zero-area focusable links non-actionable', async () => {
+        for (const overrides of [{ visibility: 'hidden' }, { bounds: undefined }]) {
+            const { session } = fixtureSession(
+                page([
+                    {
+                        ...BUTTON,
+                        role: 'link',
+                        pointerEvents: 'none',
+                        properties: { focusable: true },
+                        ...overrides,
+                    },
+                ])
+            );
+            const snapshot = await new PageState().capture(session, {});
+            expect(snapshot.nodes.find(node => node.role === 'link')?.ref).toBeUndefined();
+        }
+    });
+
     it('withholds a ref from a node the layout engine never rendered', async () => {
         const { session } = fixtureSession(page([{ ...BUTTON, bounds: undefined }]));
         const snapshot = await new PageState().capture(session, {});
@@ -199,6 +239,21 @@ describe('identityChanged', () => {
 
     it('ignores case and surrounding whitespace', () => {
         expect(identityChanged(at('button', ' Save '), at('button', 'save'))).toBe(false);
+    });
+
+    it('normalizes live labels exactly as snapshots normalize flight times and spacing', () => {
+        expect(
+            identityChanged(
+                at('link', 'Viva at 1:55 PM. Select flight'),
+                at('link', 'Viva at 1:55\u202fPM.  Select flight')
+            )
+        ).toBe(false);
+        expect(
+            identityChanged(
+                at('link', 'Viva at 1:55 PM. Select flight'),
+                at('link', 'Viva at 2:55\u202fPM.  Select flight')
+            )
+        ).toBe(true);
     });
 
     it('does not treat two short unrelated names as the same because they share a letter', () => {

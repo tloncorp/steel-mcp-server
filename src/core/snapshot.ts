@@ -11,8 +11,10 @@ const COMPUTED_STYLES = ['pointer-events', 'visibility', 'display', 'opacity'] a
 
 /** One node of a rendered snapshot. Only nodes with a `ref` can be targeted by an action. */
 export interface SnapshotNode {
-    /** `@eN`, present only on nodes that are visible and receive pointer events. */
+    /** `@eN`, present only on visible controls with pointer or keyboard activation. */
     ref?: string | undefined;
+    /** A focusable link/button that accepts keyboard activation but not pointer events. */
+    activation?: 'keyboard' | undefined;
     role: string;
     name: string;
     /** True when the name was synthesised because the element has no accessible name. */
@@ -242,7 +244,7 @@ const INTERACTIVE_ROLES = new Set([
 ]);
 
 /**
- * Decides whether a node may be targeted: it must be rendered, visible, accept pointer events,
+ * Decides whether a node may be targeted: it must be rendered, visible, accept pointer or keyboard input,
  * and be something a person could actually interact with. A container that merely happens to be
  * visible gets no ref, so the model structurally cannot aim an action at the page background.
  */
@@ -250,7 +252,7 @@ function isTargetable(facts: DomFacts | undefined, role: string, focusable: bool
     if (!facts?.bounds) return false;
     const [, , width, height] = facts.bounds;
     if (width <= 0 || height <= 0) return false;
-    if (facts.styles['pointer-events'] === 'none') return false;
+    if (facts.styles['pointer-events'] === 'none' && !(focusable && ['link', 'button'].includes(role))) return false;
     if (facts.styles.visibility === 'hidden' || facts.styles.visibility === 'collapse') return false;
     if (NEVER_TARGETABLE_ROLES.has(role)) return false;
     return facts.clickable || focusable || INTERACTIVE_ROLES.has(role);
@@ -297,8 +299,8 @@ export function identityChanged(
 ): boolean {
     if (recorded.role !== live.role) return true;
 
-    const before = recorded.name.trim().toLowerCase();
-    const after = live.name.trim().toLowerCase();
+    const before = cleanText(recorded.name).toLowerCase();
+    const after = cleanText(live.name).toLowerCase();
     if (before === after) return false;
     return before !== '' && after !== '';
 }
@@ -312,6 +314,7 @@ export function renderSnapshot(nodes: SnapshotNode[]): string {
             if (node.name) parts.push(`"${node.name}"`);
             if (node.nameInferred && node.name) parts.push('(inferred)');
             if (node.ref) parts.push(node.ref);
+            if (node.activation === 'keyboard') parts.push('[activation=keyboard]');
             if (node.value !== undefined) parts.push(`[value=${JSON.stringify(node.value)}]`);
             for (const [key, value] of Object.entries(node.properties ?? {})) parts.push(`[${key}=${value}]`);
             if (!node.inViewport) parts.push('[off-screen]');
@@ -521,6 +524,7 @@ export class PageState {
             if (keep) {
                 nodes.push({
                     ref,
+                    activation: ref && nodeFacts?.styles['pointer-events'] === 'none' ? 'keyboard' : undefined,
                     role,
                     name,
                     nameInferred: accessibleName === '' && inferredName !== '',

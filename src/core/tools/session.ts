@@ -75,7 +75,9 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                         .positive()
                         .max(86_400_000)
                         .optional()
-                        .describe('Lifetime ms; immutable.'),
+                        .describe(
+                            'Immutable lifetime in ms. Omit to use the deployment default; set only for a required shorter lifetime.'
+                        ),
                 })
                 .strict(),
             // A host that supports MCP Apps renders the live viewer beside this result. A host that

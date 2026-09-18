@@ -629,11 +629,86 @@ export class BrowserPage {
         return `Typed ${shown} into ${handle.describe}.`;
     }
 
+    /** Activates an observed keyboard-only control, never a guessed neighbour or a JS click. */
+    private async activateKeyboardControl(handle: TargetHandle): Promise<ActOutcome> {
+        const identity = await this.liveIdentity(handle.backendNodeId);
+        if (!identity || !handle.node || !['link', 'button'].includes(identity.role)) {
+            throw clickLayoutUnavailableError(handle.describe);
+        }
+        this.state.assertIdentityUnchanged(handle.node.ref!, identity);
+        await this.session.send('Page.bringToFront');
+        await this.session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: handle.backendNodeId });
+        const { object } = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
+            backendNodeId: handle.backendNodeId,
+        });
+        if (!object?.objectId) throw clickLayoutUnavailableError(handle.describe);
+        try {
+            // A keyboard-only overlay may sit above the pointer-enabled contents of the same card.
+            // Reject unrelated overlays, including modal dialogs and background focus targets.
+            const functionDeclaration = `function(focus) {
+                const doc = this.ownerDocument;
+                const win = doc.defaultView;
+                const style = win.getComputedStyle(this);
+                const rect = this.getBoundingClientRect();
+                if (!this.isConnected || this.tabIndex < 0 || this.matches(':disabled') ||
+                    style.pointerEvents !== 'none' || rect.width <= 0 || rect.height <= 0) return false;
+                for (let el = this; el; el = el.parentElement) {
+                    const css = win.getComputedStyle(el);
+                    if (el.inert || el.hidden || el.getAttribute('aria-disabled') === 'true' ||
+                        el.getAttribute('aria-hidden') === 'true' || css.display === 'none' ||
+                        css.visibility !== 'visible' || Number(css.opacity) === 0) return false;
+                }
+                for (const modal of doc.querySelectorAll('dialog[open], [aria-modal="true"]')) {
+                    if (modal.getClientRects().length && !modal.contains(this)) return false;
+                }
+                const x = Math.max(0, Math.min(win.innerWidth - 1, rect.x + rect.width / 2));
+                const y = Math.max(0, Math.min(win.innerHeight - 1, rect.y + rect.height / 2));
+                const hit = doc.elementFromPoint(x, y);
+                const parent = this.parentElement;
+                if (!hit || !parent) return false;
+                if (hit !== this && !this.contains(hit)) {
+                    const bounds = parent.getBoundingClientRect();
+                    if (parent === doc.body || parent === doc.documentElement || !parent.contains(hit) ||
+                        bounds.width > rect.width * 1.5 || bounds.height > rect.height * 1.5 ||
+                        hit.closest('button, a, input, select, textarea, [role="button"], [role="link"]')) return false;
+                }
+                if (focus) this.focus({ preventScroll: true });
+                return doc.hasFocus() && doc.activeElement === this;
+            }`;
+            const check = async (focus: boolean) => {
+                const result = await this.session.send<{ result?: { value?: boolean } }>('Runtime.callFunctionOn', {
+                    objectId: object.objectId,
+                    functionDeclaration,
+                    arguments: [{ value: focus }],
+                    returnByValue: true,
+                });
+                if (result.result?.value !== true) {
+                    throw clickBlockedError(handle.describe, 'a hidden, disabled, obscured or unfocusable control');
+                }
+            };
+            await check(true);
+            const baseline = await this.beginChange();
+            const focusedIdentity = await this.liveIdentity(handle.backendNodeId);
+            if (!focusedIdentity) throw clickLayoutUnavailableError(handle.describe);
+            this.state.assertIdentityUnchanged(handle.node.ref!, focusedIdentity);
+            await check(false);
+            await this.pressKey('Enter');
+            const { change, description } = await this.settleNow(baseline);
+            this.clearClickFailures();
+            return { summary: `Activated ${handle.describe} with Enter.`, change, changeDescription: description };
+        } finally {
+            await this.session.send('Runtime.releaseObject', { objectId: object.objectId }).catch(() => {});
+        }
+    }
+
     async act(request: ActRequest): Promise<ActOutcome> {
         switch (request.action) {
             case 'click':
             case 'check': {
                 const handle = await this.resolveTarget(this.requireTarget(request));
+                if (request.action === 'click' && handle.node?.ref && handle.node.activation === 'keyboard') {
+                    return this.activateKeyboardControl(handle);
+                }
                 const point = await this.reachablePoint(handle);
                 const baseline = await this.beginChange();
                 await this.clickAt(point);

@@ -74,6 +74,30 @@ describe('Jev configuration and action space', () => {
         );
     });
 
+    it('preserves control state and excludes selected tabs and disabled actions', () => {
+        const page = snapshot([
+            node({ role: 'tab', name: 'Cheapest', properties: { selected: true } }),
+            node({ ref: '@e2', role: 'button', name: 'Search', properties: { disabled: true } }),
+            node({ ref: '@e3', role: 'tab', name: 'Best', properties: { selected: false } }),
+            node({ ref: '@e4', role: 'button', name: 'Show filters', properties: { expanded: true } }),
+        ]);
+        expect(runEvidence(page)).toContain('tab Cheapest [selected=true]');
+        expect(runEvidence(page)).toContain('button Search [disabled=true]');
+        expect(runEvidence(page)).toContain('button Show filters [expanded=true]');
+        const labels = [...runCandidates(page, []).values()].map(choice => choice.label);
+        expect(labels).not.toContain('Click tab Cheapest');
+        expect(labels).not.toContain('Click button Search');
+        expect(labels).toContain('Click tab Best');
+    });
+
+    it('keeps itinerary details and keyboard activation in evidence', () => {
+        const name = `From 282 US dollars round trip total. ${'Flight detail. '.repeat(16)} Arrives at MEX at 10:10 PM. Select flight`;
+        const page = snapshot([node({ role: 'link', name, activation: 'keyboard' })]);
+        expect(runEvidence(page)).toContain('Arrives at MEX at 10:10 PM');
+        expect(runEvidence(page)).toContain('[activation=keyboard]');
+        expect(runCandidates(page, []).get('click_0')?.label).toContain('Arrives at MEX at 10:10 PM');
+    });
+
     it('keeps login links and caps action choices below the provider limit', () => {
         const nodes = Array.from({ length: 500 }, (_, index) =>
             node({ ref: `@e${index}`, role: 'link', name: index ? `Page ${index}` : 'Log in' })
