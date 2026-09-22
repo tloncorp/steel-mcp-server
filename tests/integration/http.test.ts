@@ -1,6 +1,7 @@
 // ABOUTME: Integration tests for the hosted fetch boundary: routing, DNS-rebinding guards, auth
 // ABOUTME: precedence, per-credential request budgets and isolation into per-credential server deps.
 import { CLIENT_CAPABILITIES_META_KEY, PROTOCOL_VERSION_META_KEY } from '@modelcontextprotocol/server';
+import { SpanStatusCode } from '@opentelemetry/api';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/core/config.js';
 import { SteelToolError } from '../../src/core/errors.js';
@@ -11,6 +12,7 @@ import { createHandleRegistryBackend, HostedRuntime } from '../../src/hosted-run
 import { createSteelHttpHandler, type RequestDepsInput } from '../../src/http.js';
 import { FakeRedis } from '../helpers/fake-redis.js';
 import { FakeSteelApi, testDeps } from '../helpers/fakes.js';
+import { tracingHarness } from '../helpers/tracing.js';
 
 const MODERN_PROTOCOL_VERSION = '2026-07-28';
 
@@ -104,6 +106,61 @@ afterEach(async () => {
 });
 
 describe('hosted HTTP authentication', () => {
+    it('attributes each request without treating its ship label as tenant identity', async () => {
+        const tracing = tracingHarness();
+        const deps = testDeps({ tracer: tracing.tracer });
+        const handler = createSteelHttpHandler({
+            allowedHostnames: ['mcp.steel.dev'],
+            allowedOriginHostnames: [],
+            depsForRequest: () => deps,
+        });
+        openHandlers.push(handler);
+        try {
+            for (const ship of ['~fildes-magwes', '~binbud-namhet', 'not a ship']) {
+                const request = toolRequest('same-credential', 'browser_scrape', { url: 'https://example.com' });
+                request.headers.set('X-Tlon-Ship', ship);
+                expect((await handler.fetch(request)).status).toBe(200);
+            }
+            const calls = tracing.spans().filter(span => span.name === 'tools/call browser_scrape');
+            expect(calls.map(span => span.attributes['tlon.ship'])).toEqual([
+                '~fildes-magwes',
+                '~binbud-namhet',
+                undefined,
+            ]);
+            expect(calls.map(span => span.attributes['steel.principal'])).toEqual(
+                Array(3).fill(principalFromCredential('same-credential'))
+            );
+        } finally {
+            await tracing.shutdown();
+        }
+    });
+
+    it('records admission rejections as failed tool calls without recording error prose', async () => {
+        const tracing = tracingHarness();
+        const deps = testDeps({ tracer: tracing.tracer });
+        deps.limiter = {
+            charge: async () => {
+                throw new SteelToolError('SECRET', { code: 'rate_limited' });
+            },
+        };
+        const handler = createSteelHttpHandler({
+            allowedHostnames: ['mcp.steel.dev'],
+            allowedOriginHostnames: [],
+            depsForRequest: () => deps,
+        });
+        openHandlers.push(handler);
+        try {
+            await handler.fetch(toolRequest('credential', 'browser_scrape', { url: 'https://example.com' }));
+            const span = tracing.span('tools/call browser_scrape');
+            expect(span.status.code).toBe(SpanStatusCode.ERROR);
+            expect(span.attributes['error.type']).toBe('rate_limited');
+            expect(JSON.stringify(span.attributes)).not.toContain('SECRET');
+            expect(span.events).toEqual([]);
+        } finally {
+            await tracing.shutdown();
+        }
+    });
+
     it('uses the bearer credential and derives a non-secret principal for the request', async () => {
         const { handler, seen } = harness();
         openHandlers.push(handler);
@@ -260,7 +317,9 @@ describe('hosted HTTP rate limiting', () => {
     }
 
     async function callScrape(handler: { fetch(request: Request): Promise<Response> }, credential: string) {
-        const response = await handler.fetch(toolRequest(credential, 'browser_scrape', { url: 'https://example.com/' }));
+        const response = await handler.fetch(
+            toolRequest(credential, 'browser_scrape', { url: 'https://example.com/' })
+        );
         const body = (await response.json()) as {
             result: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown };
         };

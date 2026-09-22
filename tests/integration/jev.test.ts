@@ -1,9 +1,11 @@
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
+import { SpanStatusCode } from '@opentelemetry/api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JEV_INSTRUCTIONS } from '../../src/core/instructions.js';
 import { createSteelMcpServer } from '../../src/core/server.js';
 import { loginWallPage, plainPage, testDeps } from '../helpers/fakes.js';
+import { tracingHarness } from '../helpers/tracing.js';
 
 const close: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -131,6 +133,9 @@ describe('Jev browser runner', () => {
         ['needs_input', {}, 'needs_input'],
     ] as const)('stops without acting for %s / %j', async (action, overrides, status) => {
         const deps = depsFor();
+        const tracing = tracingHarness();
+        close.push(() => tracing.shutdown());
+        deps.tracer = tracing.tracer;
         deps.jevFetch = vi.fn<typeof fetch>().mockResolvedValue(decision(action, overrides));
         const { client } = await connect(deps);
         const record = await session(deps);
@@ -139,6 +144,15 @@ describe('Jev browser runner', () => {
             arguments: { session_id: record.handle, task: 'Read the page' },
         });
         expect(result.structuredContent).toMatchObject({ status, steps: [{ executed: false }] });
+        const span = tracing.span('tools/call browser_run');
+        expect(span.attributes).toMatchObject({
+            'browser.outcome': status,
+            'browser.run.calls': 1,
+            'browser.run.actions_completed': 0,
+            'browser.run.input_tokens': 100,
+        });
+        expect(span.status.code).toBe(SpanStatusCode.UNSET);
+        expect(tracing.span('browser decision').parentSpanContext?.spanId).toBe(span.spanContext().spanId);
         expect(
             deps.pool.fixtureFor(record.steelSessionId)!.sent.filter(call => call.method.startsWith('Input.'))
         ).toHaveLength(0);
@@ -146,6 +160,9 @@ describe('Jev browser runner', () => {
 
     it('rejects unoffered actions and keeps provider errors out of results', async () => {
         const deps = depsFor();
+        const tracing = tracingHarness();
+        close.push(() => tracing.shutdown());
+        deps.tracer = tracing.tracer;
         deps.jevFetch = vi
             .fn<typeof fetch>()
             .mockResolvedValueOnce(decision('execute_arbitrary_js'))
@@ -153,11 +170,16 @@ describe('Jev browser runner', () => {
         const { client } = await connect(deps);
         const record = await session(deps);
         for (const code of ['jev_invalid_response', 'jev_unavailable']) {
+            tracing.reset();
             const result = await client.callTool({
                 name: 'browser_run',
                 arguments: { session_id: record.handle, task: 'Read the page' },
             });
             expect(result.structuredContent).toMatchObject({ status: 'error', error_code: code });
+            const span = tracing.span('tools/call browser_run');
+            expect(span.status.code).toBe(SpanStatusCode.ERROR);
+            expect(span.attributes['error.type']).toBe(code);
+            expect(JSON.stringify(span.attributes)).not.toContain('operator-inference-key');
             expect(JSON.stringify(result)).not.toContain('operator-inference-key');
         }
     });

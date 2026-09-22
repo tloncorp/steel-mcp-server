@@ -27,6 +27,8 @@ export interface SteelConfig {
     connectUrl: string;
     deployment: Deployment;
     profile: ProfileName;
+    /** Operator-owned route templates; dynamic segments are never recorded. Empty means origin only. */
+    traceUrlPaths?: string[];
     /** Operator-owned inference credentials, never the caller's browser tenant key. */
     jev?: { apiKey: string; model: string };
     /**
@@ -150,6 +152,11 @@ export function loadConfig(env: Record<string, string | undefined>): SteelConfig
         connectUrl: env.STEEL_CONNECT_URL ?? (deployment === 'cloud' ? CLOUD_CONNECT_URL : toWebSocketUrl(baseUrl)),
         deployment,
         profile: profileName as ProfileName,
+        traceUrlPaths: (env.BROWSER_TRACE_URL_PATHS ?? '')
+            .split(',')
+            .map(value => value.trim())
+            .filter(value => value.length <= 160 && /^\/(?:[a-zA-Z0-9_:-]+\/?)*$/.test(value))
+            .slice(0, 32),
         jev: env.OPENROUTER_API_KEY?.trim()
             ? { apiKey: env.OPENROUTER_API_KEY.trim(), model: env.BROWSER_JEV_MODEL?.trim() || '~typesafe/jev-latest' }
             : undefined,

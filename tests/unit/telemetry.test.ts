@@ -1,19 +1,99 @@
 // ABOUTME: Unit tests for the W3C trace-context plumbing: what the server accepts from a client's
 // ABOUTME: _meta, what it refuses, and the traceparent it puts on its own outbound calls.
 import { BAGGAGE_META_KEY, TRACEPARENT_META_KEY, TRACESTATE_META_KEY } from '@modelcontextprotocol/server';
-import { context, propagation, ROOT_CONTEXT, TraceFlags, trace } from '@opentelemetry/api';
+import { context, propagation, ROOT_CONTEXT, SpanStatusCode, TraceFlags, trace } from '@opentelemetry/api';
 import { describe, expect, it } from 'vitest';
 import {
     activeTraceparent,
     contextFromRequestMeta,
     formatTraceparent,
     parseTraceparent,
+    recordBrowserUrl,
+    recordToolOutcome,
+    traceShip,
 } from '../../src/core/telemetry.js';
 import { tracingHarness } from '../helpers/tracing.js';
 
 const TRACE_ID = '4bf92f3577b34da6a3ce929d0e0e4736';
 const SPAN_ID = '00f067aa0ba902b7';
 const SAMPLED = `00-${TRACE_ID}-${SPAN_ID}-01`;
+
+describe('browser trace projection', () => {
+    it('bounds ship labels without accepting arbitrary text', () => {
+        expect(traceShip(' ~pinser-botter-fildes-magwes ')).toBe('~pinser-botter-fildes-magwes');
+        for (const value of [null, '', 'fildes-magwes', '~zod\ninjected', `~${'a'.repeat(130)}`]) {
+            expect(traceShip(value)).toBeUndefined();
+        }
+    });
+
+    it('records origins and configured route templates, never URL secrets or dynamic segments', async () => {
+        const harness = tracingHarness();
+        try {
+            harness.tracer.startActiveSpan('urls', span => {
+                recordBrowserUrl('requested', 'https://user:SECRET@example.com/wiki/PRIVATE?token=SECRET#SECRET', [
+                    '/wiki/:page',
+                ]);
+                recordBrowserUrl('final', 'https://viewer.example/s/SECRET?clipboardBridge=true', ['/s/:capability']);
+                recordBrowserUrl('initial', 'file:///PRIVATE');
+                span.end();
+            });
+            expect(harness.span('urls').attributes).toEqual({
+                'browser.url.requested.origin': 'https://example.com',
+                'browser.url.requested.route': '/wiki/:page',
+                'browser.url.final.origin': 'https://viewer.example',
+            });
+        } finally {
+            await harness.shutdown();
+        }
+    });
+
+    it('records returned failures and bounded run statistics without copying evidence', async () => {
+        const harness = tracingHarness();
+        try {
+            harness.tracer.startActiveSpan('result', span => {
+                recordToolOutcome(span, {
+                    isError: true,
+                    content: [{ text: 'SECRET' }],
+                    structuredContent: {
+                        status: 'timeout',
+                        error_code: 'timeout',
+                        session_id: 'sess_PRIVATE',
+                        steps: [{ attempted: true, executed: false, description: 'SECRET', target: 'SECRET' }],
+                        usage: { calls: 1, input_tokens: 100, output_tokens: 5, cost_usd: 0.001, cost_reported: true },
+                    },
+                });
+                span.end();
+            });
+            const span = harness.span('result');
+            expect(span.status.code).toBe(SpanStatusCode.ERROR);
+            expect(span.attributes).toMatchObject({
+                'browser.outcome': 'timeout',
+                'error.type': 'timeout',
+                'browser.run.actions_attempted': 1,
+                'browser.run.actions_completed': 0,
+                'browser.run.input_tokens': 100,
+            });
+            expect(span.attributes['browser.session.id']).toMatch(/^[a-f0-9]{64}$/);
+            expect(JSON.stringify({ attributes: span.attributes, events: span.events })).not.toMatch(/SECRET|PRIVATE/);
+        } finally {
+            await harness.shutdown();
+        }
+    });
+
+    it('distinguishes review from an execution failure', async () => {
+        const harness = tracingHarness();
+        try {
+            harness.tracer.startActiveSpan('review', span => {
+                recordToolOutcome(span, { structuredContent: { status: 'needs_review' } });
+                span.end();
+            });
+            expect(harness.span('review').attributes['browser.outcome']).toBe('needs_review');
+            expect(harness.span('review').status.code).toBe(SpanStatusCode.UNSET);
+        } finally {
+            await harness.shutdown();
+        }
+    });
+});
 
 describe('parseTraceparent', () => {
     it('reads the trace id, span id and sampled flag from a valid header', () => {

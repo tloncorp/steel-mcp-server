@@ -1,5 +1,7 @@
 // ABOUTME: Tracing for the core: reads W3C trace context out of a request's _meta, opens one span per
 // ABOUTME: tool call, and formats the traceparent this server puts on its own outbound Steel calls.
+
+import { createHash } from 'node:crypto';
 import { BAGGAGE_META_KEY, TRACEPARENT_META_KEY, TRACESTATE_META_KEY } from '@modelcontextprotocol/server';
 import {
     type Context,
@@ -165,6 +167,7 @@ export interface ToolSpanTarget {
     deployment: string;
     /** The one-way principal digest. The credential it came from must never reach a span. */
     principal: string;
+    ship?: string | undefined;
 }
 
 /** Runs one tool call inside a span parented on the caller's trace context. */
@@ -184,6 +187,7 @@ export function withToolCallSpan<T>(
                 'steel.profile': target.profile,
                 'steel.deployment': target.deployment,
                 'steel.principal': target.principal,
+                ...(target.ship ? { 'tlon.ship': target.ship } : {}),
             },
         },
         contextFromRequestMeta(meta),
@@ -256,6 +260,144 @@ export function withCdpSpan<T>(
         `cdp ${operation}`,
         // The CDP URL is deliberately absent: it carries the Steel API key as a query parameter.
         { kind: SpanKind.CLIENT, attributes: { 'steel.session.id': steelSessionId } },
+        async span => {
+            try {
+                return await work();
+            } catch (error) {
+                recordSpanFailure(span, error);
+                throw error;
+            } finally {
+                span.end();
+            }
+        }
+    );
+}
+
+/** Bounds an untrusted label without treating it as proof of ship ownership. */
+export function traceShip(value: string | null): string | undefined {
+    const ship = value?.trim();
+    return ship && ship.length <= 128 && /^~[a-z]{3,6}(?:-+[a-z]{3,6})*$/.test(ship) ? ship : undefined;
+}
+
+/** Records only web origins and explicitly configured route templates, never raw path segments. */
+export function recordBrowserUrl(kind: 'requested' | 'initial' | 'final', raw: unknown, paths: string[] = []): void {
+    if (typeof raw !== 'string' || raw.length > 16384) return;
+    try {
+        const url = new URL(raw);
+        if (!['http:', 'https:'].includes(url.protocol)) return;
+        const span = trace.getActiveSpan();
+        span?.setAttribute(`browser.url.${kind}.origin`, url.origin);
+        const segments = url.pathname.split('/');
+        // Viewer/artifact links are bearer capabilities, not browsing routes.
+        if (['s', 'artifacts', 'credentials'].includes(segments[1] ?? '')) return;
+        const route = paths.find(template => {
+            const parts = template.split('/');
+            return (
+                parts.length === segments.length &&
+                parts.every((part, index) =>
+                    part.startsWith(':') ? Boolean(segments[index]) : part === segments[index]
+                )
+            );
+        });
+        if (route) span?.setAttribute(`browser.url.${kind}.route`, route);
+    } catch {
+        /* Invalid URLs never make telemetry fail a tool call. */
+    }
+}
+
+/** A handle correlates calls without exposing a reusable identifier in the trace backend. */
+export function recordBrowserSession(handle: unknown): void {
+    if (typeof handle === 'string' && handle.length <= 256) {
+        trace.getActiveSpan()?.setAttribute('browser.session.id', createHash('sha256').update(handle).digest('hex'));
+    }
+}
+
+function object(value: unknown): Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+}
+
+const OUTCOMES = new Set([
+    'done',
+    'needs_review',
+    'needs_input',
+    'needs_confirmation',
+    'needs_handoff',
+    'stuck',
+    'uncertain',
+    'page_changed',
+    'timeout',
+    'cancelled',
+    'error',
+    'max_steps',
+    'live',
+    'released',
+]);
+
+/** An explicit projection: tool content, error prose, input values and links never enter telemetry. */
+export function recordToolOutcome(span: Span, result: unknown, paths: string[] = []): void {
+    const response = object(result);
+    const data = object(response.structuredContent);
+    const status = typeof data.status === 'string' && OUTCOMES.has(data.status) ? data.status : undefined;
+    span.setAttribute(
+        'browser.outcome',
+        status ?? (response.isError === true ? 'error' : response.inputRequests ? 'needs_input' : 'completed')
+    );
+    if (response.isError === true) {
+        const code = object(data.error).code ?? data.error_code;
+        span.setAttribute('error.type', typeof code === 'string' && /^[a-z_]{1,64}$/.test(code) ? code : 'tool_error');
+        span.setStatus({ code: SpanStatusCode.ERROR });
+    }
+    recordBrowserSession(data.session_id);
+    recordBrowserUrl('final', data.final_url, paths);
+    for (const key of ['navigated', 'dom_changed', 'focus_changed']) {
+        if (typeof data[key] === 'boolean') span.setAttribute(`browser.${key}`, data[key]);
+    }
+    if (Array.isArray(data.steps)) {
+        span.setAttribute('browser.run.steps', data.steps.length);
+        span.setAttribute(
+            'browser.run.actions_attempted',
+            data.steps.filter(step => object(step).attempted === true).length
+        );
+        span.setAttribute(
+            'browser.run.actions_completed',
+            data.steps.filter(step => object(step).executed === true).length
+        );
+        for (const [index, value] of data.steps.slice(0, 24).entries()) {
+            const step = object(value);
+            const action =
+                typeof step.action === 'string' &&
+                /^(?:(?:click|type)_\d{1,3}|scroll_(?:down|up)|back|done|needs_input|needs_confirmation)$/.test(
+                    step.action
+                )
+                    ? step.action.replace(/_\d+$/, '')
+                    : 'unknown';
+            span.addEvent('browser.run.step', {
+                'browser.run.step': index + 1,
+                'browser.action': action,
+                'browser.action.attempted': step.attempted === true,
+                'browser.action.completed': step.executed === true,
+            });
+        }
+    }
+    const usage = object(data.usage);
+    for (const key of ['calls', 'input_tokens', 'output_tokens', 'cost_usd']) {
+        const value = usage[key];
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+            span.setAttribute(`browser.run.${key}`, value);
+    }
+    if (typeof usage.cost_reported === 'boolean') span.setAttribute('browser.run.cost_reported', usage.cost_reported);
+}
+
+/** One timed inference request, with no task, page evidence, provider body or typed input. */
+export function withBrowserDecisionSpan<T>(tracer: Tracer, model: string, work: () => Promise<T>): Promise<T> {
+    return tracer.startActiveSpan(
+        'browser decision',
+        {
+            kind: SpanKind.CLIENT,
+            attributes: { 'gen_ai.request.model': model.slice(0, 128), 'server.address': 'openrouter.ai' },
+        },
         async span => {
             try {
                 return await work();

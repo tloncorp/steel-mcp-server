@@ -7,6 +7,7 @@ import { decide } from '../jev.js';
 import { inspectInteractiveBlock } from '../mrtr.js';
 import type { ActRequest } from '../page.js';
 import type { PageSnapshot } from '../snapshot.js';
+import { resolveTracer, withBrowserDecisionSpan } from '../telemetry.js';
 import { fenceUntrusted } from '../untrusted.js';
 import { sessionIdSchema, successResult, withPage } from './shared.js';
 
@@ -165,18 +166,21 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                         // Meter every inference, not just the outer call, so a run cannot bypass tenant budgets.
                         await deps.limiter?.charge(deps.principal, 'browser_run');
                         usage.calls++;
-                        const decision = await decide(
-                            config,
-                            {
-                                task: args.task,
-                                origin: new URL(snapshot.url).origin,
-                                page: evidence,
-                                inputs: (args.inputs ?? []).map(({ field, value }) => ({ field, value })),
-                                history: steps.slice(-6),
-                            },
-                            criteria,
-                            signal,
-                            deps.jevFetch
+                        const origin = new URL(snapshot.url).origin;
+                        const decision = await withBrowserDecisionSpan(resolveTracer(deps.tracer), config.model, () =>
+                            decide(
+                                config,
+                                {
+                                    task: args.task,
+                                    origin,
+                                    page: evidence,
+                                    inputs: (args.inputs ?? []).map(({ field, value }) => ({ field, value })),
+                                    history: steps.slice(-6),
+                                },
+                                criteria,
+                                signal,
+                                deps.jevFetch
+                            )
                         );
                         usage.input_tokens += decision.usage.input_tokens;
                         usage.output_tokens += decision.usage.output_tokens;

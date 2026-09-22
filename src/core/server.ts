@@ -1,14 +1,22 @@
 // ABOUTME: Assembles an McpServer for one profile: registers the tool table in a fixed order, serves
 // ABOUTME: the live-view app resource, and sets the cache hints the 2026-07-28 revision requires.
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { SESSION_VIEWER_HTML, SESSION_VIEWER_MIME_TYPE, SESSION_VIEWER_URI } from './apps/session-viewer.js';
 import type { SteelConfig } from './config.js';
 import type { ServerDeps, ToolHost } from './context.js';
 import { toolErrorResult } from './errors.js';
 import { JEV_INSTRUCTIONS, SERVER_INSTRUCTIONS } from './instructions.js';
 import { operationHost } from './operation-lock.js';
+import { ACTIONS } from './page.js';
 import { toolsForProfile } from './profiles.js';
 import type { RateLimiter } from './rate-limit.js';
+import {
+    recordBrowserSession,
+    recordBrowserUrl,
+    recordToolOutcome,
+    resolveTracer,
+    withToolCallSpan,
+} from './telemetry.js';
 import { SERVER_VERSION } from './version.js';
 
 /** One hour. The tool list and viewer shell are org-independent, so both cache publicly. */
@@ -82,7 +90,7 @@ type ErasedRegisterTool = (name: string, config: unknown, handler: (...args: unk
  * schema, so a wrapper that only forwards its arguments cannot be spelled in those types. The two
  * casts erase them and restore them again around a body that inspects nothing but the tool name.
  */
-function meteredHost(server: McpServer, limiter: RateLimiter, principal: string): ToolHost {
+function meteredHost(server: ToolHost, limiter: RateLimiter, principal: string): ToolHost {
     const register = server.registerTool.bind(server) as unknown as ErasedRegisterTool;
     const metered: ErasedRegisterTool = (name, config, handler) =>
         register(name, config, async (...args) => {
@@ -94,6 +102,38 @@ function meteredHost(server: McpServer, limiter: RateLimiter, principal: string)
             return handler(...args);
         });
     return { registerTool: metered as unknown as ToolHost['registerTool'], server: server.server };
+}
+
+/** The outer boundary also observes admission/lease rejections and returned tool errors. */
+function tracedHost(server: ToolHost, deps: ServerDeps): ToolHost {
+    const register = server.registerTool.bind(server) as unknown as ErasedRegisterTool;
+    const traced: ErasedRegisterTool = (name, config, handler) =>
+        register(name, config, async (...args) => {
+            const input = args[0] as Record<string, unknown>;
+            const ctx = args[1] as ServerContext;
+            return withToolCallSpan(
+                resolveTracer(deps.tracer),
+                {
+                    toolName: name,
+                    profile: deps.config.profile,
+                    deployment: deps.config.deployment,
+                    principal: deps.principal,
+                    ship: deps.ship,
+                },
+                ctx.mcpReq._meta,
+                async span => {
+                    recordBrowserSession(input.session_id);
+                    recordBrowserUrl('requested', input.url, deps.config.traceUrlPaths);
+                    if (typeof input.action === 'string' && (ACTIONS as readonly string[]).includes(input.action)) {
+                        span.setAttribute('browser.action', input.action);
+                    }
+                    const result = await handler(...args);
+                    recordToolOutcome(span, result, deps.config.traceUrlPaths);
+                    return result;
+                }
+            );
+        });
+    return { registerTool: traced as unknown as ToolHost['registerTool'], server: server.server };
 }
 
 /**
@@ -136,7 +176,8 @@ export function createSteelMcpServer(deps: ServerDeps): McpServer {
 
     registerSessionViewer(server, deps.config);
 
-    const metered = deps.limiter ? meteredHost(server, deps.limiter, deps.principal) : server;
+    const traced = tracedHost(server, deps);
+    const metered = deps.limiter ? meteredHost(traced, deps.limiter, deps.principal) : traced;
     const host = deps.config.jev ? operationHost(metered, deps) : metered;
     for (const tool of toolsForProfile(deps.config.profile, Boolean(deps.config.jev))) {
         tool.register(host, deps);

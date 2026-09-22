@@ -6,6 +6,7 @@ import type { PublishedArtifact } from '../artifacts.js';
 import type { ServerDeps, ToolHost } from '../context.js';
 import { botDetectionError, detectBotBlock, SteelToolError } from '../errors.js';
 import type { ScrapeFormat } from '../steel/types.js';
+import { recordBrowserUrl } from '../telemetry.js';
 import { type Provenance, stripHtmlComments, stripInvisible } from '../untrusted.js';
 import { cursorSchema, fencedSection, guard, maxTokensSchema, successResult, withPage } from './shared.js';
 
@@ -239,6 +240,7 @@ export function registerScrape(host: ToolHost, deps: ServerDeps): void {
                 );
 
                 const finalUrl = response.metadata.urlSource ?? args.url;
+                recordBrowserUrl('final', finalUrl, deps.config.traceUrlPaths);
                 const body = renderContent(response.content, format);
 
                 const block = detectBotBlock({

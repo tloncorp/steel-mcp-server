@@ -1,6 +1,7 @@
 // ABOUTME: The stateful browsing tools — navigate, snapshot, find, act and wait_for — each taking a
 // ABOUTME: session handle and returning a change signal rather than a bare success.
 import type { ServerContext } from '@modelcontextprotocol/server';
+import { trace } from '@opentelemetry/api';
 import { z } from 'zod';
 import type { ServerDeps, ToolHost } from '../context.js';
 import { SteelToolError } from '../errors.js';
@@ -10,6 +11,7 @@ import { DEFAULT_MAX_TOKENS, paginate } from '../pagination.js';
 import type { HandleRecord } from '../registry.js';
 import type { SnapshotNode } from '../snapshot.js';
 import { renderSnapshot } from '../snapshot.js';
+import { recordBrowserUrl } from '../telemetry.js';
 import { fenceUntrusted } from '../untrusted.js';
 import { resolveManualHandoff } from './handoff.js';
 import {
@@ -92,6 +94,7 @@ export function registerNavigate(host: ToolHost, deps: ServerDeps): void {
         async (args, ctx) =>
             withPage(deps, 'browser_navigate', ctx.mcpReq, args.session_id, async (page, record) => {
                 const outcome = await page.navigate(args.url);
+                recordBrowserUrl('final', outcome.finalUrl, deps.config.traceUrlPaths);
                 const handedOff = await handoff(ctx, args.session_id, record, page);
                 if (handedOff) return handedOff;
 
@@ -311,7 +314,10 @@ export function registerAct(host: ToolHost, deps: ServerDeps): void {
                 };
                 let outcome: Awaited<ReturnType<BrowserPage['act']>>;
                 try {
+                    trace.getActiveSpan()?.setAttribute('browser.action.attempted', true);
                     outcome = await page.act(request);
+                    trace.getActiveSpan()?.setAttribute('browser.action.completed', true);
+                    recordBrowserUrl('final', outcome.change.navigatedToUrl, deps.config.traceUrlPaths);
                 } catch (error) {
                     if (
                         error instanceof SteelToolError &&

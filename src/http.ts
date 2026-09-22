@@ -9,6 +9,7 @@ import {
 import type { ServerDeps } from './core/context.js';
 import { principalFromCredential } from './core/registry.js';
 import { createSteelMcpServer } from './core/server.js';
+import { traceShip } from './core/telemetry.js';
 
 export interface RequestDepsInput {
     /** Raw Steel credential for clients that must authenticate to Steel on this request. */
@@ -96,7 +97,7 @@ export function createSteelHttpHandler(options: SteelHttpHandlerOptions): McpHtt
             }
             const principal = principalFromCredential(credential);
             const deps = await options.depsForRequest({ credential, principal, request });
-            return createSteelMcpServer({ ...deps, principal });
+            return createSteelMcpServer({ ...deps, principal, ship: traceShip(request.headers.get('x-tlon-ship')) });
         },
         { legacy: 'stateless', onerror: options.onerror }
     );

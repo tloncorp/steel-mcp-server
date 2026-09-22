@@ -9,7 +9,7 @@ import type { BrowserPage } from '../page.js';
 import { DEFAULT_MAX_TOKENS, paginate } from '../pagination.js';
 import type { HandleRecord } from '../registry.js';
 import type { PageSnapshot } from '../snapshot.js';
-import { recordSpanFailure, resolveTracer, withToolCallSpan } from '../telemetry.js';
+import { recordBrowserUrl } from '../telemetry.js';
 import { fenceUntrusted } from '../untrusted.js';
 
 /** The `session_id` argument shared by every stateful tool. */
@@ -46,35 +46,20 @@ export type ToolRequest = Pick<ServerContext['mcpReq'], 'signal' | '_meta'>;
 export type ToolOutcome = CallToolResult | InputRequiredResult;
 
 /**
- * Runs a handler inside its tool-call span and converts anything it throws into an error result.
- *
- * The span is the outermost layer so a failure is recorded as one before it becomes an ordinary
- * result. It records the error code only, and never touches the bytes the caller receives.
+ * Converts handler exceptions into tool errors. The registration boundary traces the result,
+ * including rejections that occur before a handler runs.
  */
 export async function guard(
-    deps: ServerDeps,
-    toolName: string,
-    request: ToolRequest,
+    _deps: ServerDeps,
+    _toolName: string,
+    _request: ToolRequest,
     work: () => Promise<ToolOutcome>
 ): Promise<ToolOutcome> {
-    return withToolCallSpan(
-        resolveTracer(deps.tracer),
-        {
-            toolName,
-            profile: deps.config.profile,
-            deployment: deps.config.deployment,
-            principal: deps.principal,
-        },
-        request._meta,
-        async span => {
-            try {
-                return await work();
-            } catch (error) {
-                recordSpanFailure(span, error);
-                return toolErrorResult(error);
-            }
-        }
-    );
+    try {
+        return await work();
+    } catch (error) {
+        return toolErrorResult(error);
+    }
 }
 
 /**
@@ -95,7 +80,15 @@ export async function withPage(
         const record = await deps.registry.resolveForAgent(sessionId, deps.principal);
         await deps.registry.touch(sessionId);
         const page = await deps.pool.page(record.steelSessionId, request.signal);
-        return work(page, record);
+        const initial = page.pageState.lastSnapshot;
+        recordBrowserUrl('initial', initial?.url, deps.config.traceUrlPaths);
+        try {
+            return await work(page, record);
+        } finally {
+            // A cached pre-action snapshot is not evidence of the final destination.
+            const final = page.pageState.lastSnapshot;
+            if (final && final !== initial) recordBrowserUrl('final', final.url, deps.config.traceUrlPaths);
+        }
     });
 }
 

@@ -51,6 +51,8 @@ export interface ServerDeps {
     sessionPlanState: RequestStateCodec<SessionPlanState>;
     /** The principal for this request's own credential; handles are re-authorised against it. */
     principal: string;
+    /** Validated, caller-supplied diagnostic label. Never used for authorization or tenant lookup. */
+    ship?: string | undefined;
     /**
      * Cost-weighted admission control for this principal.
      *

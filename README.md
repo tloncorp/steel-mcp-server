@@ -314,10 +314,35 @@ a separate tenant and can consume shared capacity.
 | `BROWSER_ARTIFACT_MAX_BYTES` | `5242880` | Maximum size of one hosted artifact |
 | `BROWSER_ARTIFACT_MAX_TOTAL_BYTES` | `67108864` | Bounded in-memory artifact budget; oldest entries are discarded first |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Any standard `OTEL_*` variable turns on OTLP tracing; `OTEL_SERVICE_NAME` defaults to `steel-mcp`. Unset means no exporter is loaded at all |
+| `BROWSER_TRACE_URL_PATHS` | — | Comma-separated route templates to record, e.g. `/login,/wiki/:page`. Only matching templates appear in traces; dynamic values are omitted. Unset records website origins only |
 
 The server never stores tenant credentials in handles or logs. A self-hosted deployment must
 terminate TLS in front of any non-cluster-local endpoint. Hosted logs are structured JSON on stdout,
 and credentials are redacted before anything reaches them.
+
+### Browser traces
+
+Configure the moon's browser upstream with `X-Tlon-Ship: ~your-bot-moon` alongside
+its `X-Api-Key`. The ship header populates `tlon.ship` for diagnostics only: it is
+caller-supplied, not verified ownership, and never selects a tenant or authorizes
+a session. It is read separately for each request, not cached on the tenant.
+
+Tool spans include `browser.url.requested.origin`, observed initial/final origins,
+a hashed `browser.session.id`, `browser.outcome`, and action change signals when
+available. Returned tool errors and admission rejections mark spans as errors.
+Runner outcomes such as `uncertain`, `needs_review`, and `needs_handoff` are control
+signals, not successful task completion and not necessarily execution failures.
+Runner spans include step/action counts and measured token/cost usage. Each
+`browser decision` child span measures one inference request. Session lifecycle
+spans record the release cause: explicit, idle, hard expiry, or stream close.
+
+No raw tool arguments, task text, selectors, typed values, page text, screenshots,
+error messages, signed capability URLs, URL credentials, query strings, or
+fragments are recorded. Optional route templates record only operator-configured
+literal segments and placeholder names, never the dynamic path values. Website
+origins and ship labels still reveal browsing activity; restrict trace access and
+retention accordingly. Ship/session/URL attributes belong in traces, not metric
+labels with unbounded cardinality.
 
 When artifact hosting is enabled, screenshot and PDF results include a signed HTTPS `resource_link`.
 The URL itself is the temporary capability: it contains no tenant credential, has no listing endpoint,

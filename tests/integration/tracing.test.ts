@@ -62,7 +62,7 @@ describe('tool-call spans', () => {
         expect(spans[0]!.status.code).toBe(SpanStatusCode.UNSET);
     });
 
-    it('carries the tool name, the profile and the principal digest, and nothing else', async () => {
+    it('carries attribution, origins and an outcome without page content', async () => {
         await harness.client.callTool({ name: 'browser_scrape', arguments: { url: 'https://example.com' } });
 
         expect(harness.tracing.span('tools/call browser_scrape').attributes).toEqual({
@@ -71,12 +71,16 @@ describe('tool-call spans', () => {
             'steel.profile': 'browse',
             'steel.deployment': 'cloud',
             'steel.principal': principalFromCredential(TEST_API_KEY),
+            'browser.url.requested.origin': 'https://example.com',
+            'browser.url.final.origin': 'https://example.com',
+            'browser.outcome': 'completed',
         });
     });
 
     it('traces a stateful tool the same way', async () => {
         const created = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
         const sessionId = (created as { structuredContent?: { session_id?: string } }).structuredContent?.session_id;
+        const correlation = harness.tracing.span('tools/call browser_session_create').attributes['browser.session.id'];
         harness.tracing.reset();
 
         await harness.client.callTool({
@@ -84,7 +88,15 @@ describe('tool-call spans', () => {
             arguments: { session_id: sessionId, url: 'https://example.com/next' },
         });
 
-        expect(harness.tracing.span('tools/call browser_navigate').attributes['mcp.tool.name']).toBe('browser_navigate');
+        expect(harness.tracing.span('tools/call browser_navigate').attributes['mcp.tool.name']).toBe(
+            'browser_navigate'
+        );
+        expect(harness.tracing.span('tools/call browser_navigate').attributes).toMatchObject({
+            'browser.session.id': correlation,
+            'browser.url.requested.origin': 'https://example.com',
+            'browser.url.final.origin': 'https://example.com',
+        });
+        expect(correlation).toMatch(/^[a-f0-9]{64}$/);
     });
 
     it('starts a root span when the caller sends no trace context', async () => {
