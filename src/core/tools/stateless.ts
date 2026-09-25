@@ -150,7 +150,8 @@ function renderLinksAndMetadata(
         .join('\n');
 
     const metadataLines = Object.entries(metadata)
-        .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
+        // Fetch time belongs in provenance, not the content fingerprint used by cursors.
+        .filter(([key, value]) => key !== 'timestamp' && (typeof value === 'string' || typeof value === 'number'))
         .map(([key, value]) => `- ${key}: ${stripInvisible(String(value))}`)
         .join('\n');
 

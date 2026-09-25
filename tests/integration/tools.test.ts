@@ -300,6 +300,55 @@ describe('browser_scrape', () => {
         }
     });
 
+    it.each(['none', 'body', 'title', 'link'] as const)(
+        'checks scrape continuation against page changes (%s), not fetch timestamps',
+        async change => {
+            let reads = 0;
+            const body = Array.from({ length: 100 }, (_, i) => `Line ${i}: stable page content.`).join('\n');
+            const api = new FakeSteelApi({
+                scrape: async () => {
+                    reads++;
+                    const changed = reads > 1;
+                    return {
+                        content: { markdown: body + (changed && change === 'body' ? '\nNew content' : '') },
+                        links: [{ url: 'https://example.com/', text: changed && change === 'link' ? 'New' : 'Home' }],
+                        metadata: {
+                            statusCode: 200,
+                            urlSource: 'https://example.com/',
+                            title: changed && change === 'title' ? 'New title' : 'Example',
+                            timestamp: `2026-09-25T00:00:0${reads}.000Z`,
+                        },
+                    };
+                },
+            });
+            const h = await connect(testDeps({ api }));
+            try {
+                const args = { url: 'https://example.com/', max_tokens: 100 };
+                const first = await h.client.callTool({ name: 'browser_scrape', arguments: args });
+                const cursor = /cursor="([^"]+)"/.exec(textOf(first))?.[1];
+                expect(cursor).toBeTruthy();
+                const second = await h.client.callTool({
+                    name: 'browser_scrape',
+                    arguments: { ...args, cursor },
+                });
+                expect(reads).toBe(2);
+                expect(isError(second)).toBe(change !== 'none');
+                if (change === 'none') {
+                    expect(second.structuredContent).toMatchObject({
+                        metadata: { timestamp: '2026-09-25T00:00:02.000Z' },
+                    });
+                    expect(textOf(second)).not.toContain('Line 0:');
+                    expect(textOf(second)).toContain('stable page content.');
+                    expect(/cursor="([^"]+)"/.exec(textOf(second))?.[1]).not.toBe(cursor);
+                } else {
+                    expect(textOf(second)).toContain('issued for different content');
+                }
+            } finally {
+                await h.close();
+            }
+        }
+    );
+
     it('bounds links and metadata inside the same text budget', async () => {
         const links = Array.from({ length: 200 }, (_, index) => ({
             url: `https://example.com/${index}/${'x'.repeat(4_000)}`,
