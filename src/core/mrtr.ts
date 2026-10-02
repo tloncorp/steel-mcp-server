@@ -11,6 +11,7 @@ import {
     type ServerContext,
 } from '@modelcontextprotocol/server';
 import type { ServerDeps } from './context.js';
+import { credentialContinuation } from './credential-continuation.js';
 import {
     assessInteractiveBlock,
     type HandoffBlockEvidence,
@@ -307,8 +308,17 @@ export async function resolveHumanHandoff(request: HandoffRequest): Promise<Inpu
         // A person who declined or cancelled is not asked twice.
         const response = inputResponse(ctx.mcpReq.inputResponses, HANDOFF_KEY);
         if (response.kind === 'elicit' && response.action !== 'accept') fail();
-        if (prior.round >= MAX_HANDOFF_ROUNDS) fail();
     }
+
+    // Filled credentials still appear as a login wall until the site's own
+    // controls finish the flow. Authorization and cancellation still apply.
+    if (
+        verdict.block.kind === 'login_wall' &&
+        (await credentialContinuation(deps, record, request.page, ctx.mcpReq.signal))
+    )
+        return undefined;
+
+    if (prior !== undefined && prior.round >= MAX_HANDOFF_ROUNDS) fail();
 
     // The client's round count is a courtesy; this one is the bound. It comes off the handle's own
     // record, so a client that never echoes the state — and a retry served by a replica that has

@@ -3,7 +3,7 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ClientCapabilities } from '@modelcontextprotocol/server';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { interactiveBlockError, toolErrorResult } from '../../src/core/errors.js';
 import { HANDOFF_KEY, MAX_HANDOFF_ROUNDS } from '../../src/core/mrtr.js';
 import { RedisHandleRegistry } from '../../src/core/registry-redis.js';
@@ -452,6 +452,36 @@ describe('the retry after a person has finished', () => {
         expect(harness.elicited).toHaveLength(MAX_HANDOFF_ROUNDS);
         expect(result.isError).toBe(true);
         expect(textOf(result)).toBe(textOf(expectedLoginError()));
+    });
+
+    it('honors a decline even when credentials are filled during the handoff', async () => {
+        const api = new FakeSteelApi();
+        const deps = testDeps({ page: loginWallPage, api, env: { STEEL_LOCAL: 'true' } });
+        let steelSessionId = '';
+        const harness = await connectModern({
+            deps,
+            elicitAction: 'decline',
+            onElicit: async () => {
+                vi.spyOn(api, 'getCredentialContinuation').mockResolvedValue({
+                    pageId: 'target',
+                    frameUrl: 'https://app.test/private',
+                    origin: 'https://app.test',
+                    kind: 'password',
+                    expiresAt: deps.now().getTime() + 60_000,
+                    submissionAttempted: false,
+                });
+                const page = await deps.pool.page(steelSessionId);
+                vi.spyOn(page, 'matchesCredentialContinuation').mockResolvedValue(true);
+            },
+        });
+        const handle = await newSession(harness);
+        steelSessionId = (await deps.registry.resolveForAgent(handle, deps.principal)).steelSessionId;
+        const result = await harness.client.callTool({
+            name: 'browser_navigate',
+            arguments: { session_id: handle, url: 'https://app.test/private' },
+        });
+        expect(harness.elicited).toHaveLength(1);
+        expect(result.isError).toBe(true);
     });
 
     it('does not ask twice when the person declined', async () => {

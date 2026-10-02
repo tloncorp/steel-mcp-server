@@ -14,6 +14,7 @@ import type {
     ArtifactRequest,
     ArtifactResponse,
     CreateSessionRequest,
+    CredentialContinuation,
     ScrapeRequest,
     ScrapeResponse,
     SessionListRequest,
@@ -28,6 +29,7 @@ import { recordSessionReleased, resolveTracer } from '../../src/core/telemetry.j
 import { type FixturePage, fixtureSession } from './cdp-fixture.js';
 
 export interface FakeSteelApiOptions {
+    continuation?: CredentialContinuation | null;
     scrape?: Partial<ScrapeResponse> | (() => Promise<ScrapeResponse>);
     details?: AccountDetails;
     traces?: AgentTraceTimeline;
@@ -60,6 +62,9 @@ export const FAKE_VIEWPORT = { width: 1280, height: 720 };
 
 /** Records every call so tests can assert on the wire shape without a network. */
 export class FakeSteelApi implements SteelApi {
+    async getCredentialContinuation(): Promise<CredentialContinuation | null> {
+        return this.options.continuation ?? null;
+    }
     readonly created: CreateSessionRequest[] = [];
     readonly released: string[] = [];
     readonly scrapes: ScrapeRequest[] = [];

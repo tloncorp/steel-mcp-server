@@ -18,6 +18,7 @@ import {
     type SnapshotNode,
 } from './snapshot.js';
 import type { CdpSession } from './steel/cdp.js';
+import type { CredentialContinuation } from './steel/types.js';
 
 /**
  * The interaction verbs, mirroring the shape of Steel's own computer-action union.
@@ -263,6 +264,55 @@ export class BrowserPage {
             }),
         ]);
         return { url: frame.url, title: typeof evaluated.result?.value === 'string' ? evaluated.result.value : '' };
+    }
+
+    /** A trusted fill receipt applies to one page and document URL, never a new tab or origin. */
+    async matchesCredentialContinuation(receipt: CredentialContinuation): Promise<boolean> {
+        const frame = await this.currentFrame();
+        if (frame.url !== receipt.frameUrl || new URL(frame.url).origin !== receipt.origin) return false;
+        const target = await this.session.send<{ targetInfo?: { targetId?: string } }>('Target.getTargetInfo');
+        return target.targetInfo?.targetId === receipt.pageId;
+    }
+
+    /** Check form association and destination without reading a credential value into Node. */
+    async isCredentialControl(target: string, kind: 'password' | 'otp'): Promise<boolean> {
+        const handle = await this.resolveTarget(target);
+        const resolved = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
+            backendNodeId: handle.backendNodeId,
+        });
+        const objectId = resolved.object?.objectId;
+        if (!objectId) return false;
+        try {
+            const result = await this.session.send<{ result?: { value?: boolean } }>('Runtime.callFunctionOn', {
+                objectId,
+                functionDeclaration: `function(kind) {
+                    const doc = this.ownerDocument;
+                    const controls = Array.from(doc.querySelectorAll('input')).filter(input => {
+                        const rect = input.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0 && !input.disabled &&
+                            (kind === 'password' ? input.type === 'password' :
+                                /one-time-code|otp|verification|security.?code|passcode/i.test(
+                                    input.autocomplete + ' ' + input.name + ' ' + input.id + ' ' + input.getAttribute('aria-label')));
+                    });
+                    const anchor = controls.find(input => input.value.length > 0);
+                    if (!anchor || !this.isConnected || !this.matches('button, input[type="submit"], [role="button"]')) return false;
+                    if (anchor.form) {
+                        if (this.form !== anchor.form && !anchor.form.contains(this)) return false;
+                        const action = this.getAttribute('formaction') || anchor.form.getAttribute('action') || doc.location.href;
+                        return new URL(action, doc.baseURI).origin === doc.location.origin;
+                    }
+                    for (let group = anchor.parentElement; group && group !== doc.body; group = group.parentElement) {
+                        if (group.querySelector('button, [role="button"], input[type="submit"]')) return group.contains(this);
+                    }
+                    return false;
+                }`,
+                arguments: [{ value: kind }],
+                returnByValue: true,
+            });
+            return result.result?.value === true;
+        } finally {
+            await this.session.send('Runtime.releaseObject', { objectId }).catch(() => {});
+        }
     }
 
     private async readMainFrameId(): Promise<string | undefined> {

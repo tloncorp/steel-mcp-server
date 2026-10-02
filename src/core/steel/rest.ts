@@ -11,6 +11,7 @@ import type {
     ArtifactRequest,
     ArtifactResponse,
     CreateSessionRequest,
+    CredentialContinuation,
     ScrapeRequest,
     ScrapeResponse,
     SessionListRequest,
@@ -308,6 +309,33 @@ export class SteelRestClient implements SteelApi {
             signal,
         });
         return { ...result, sessions: Array.isArray(result.sessions) ? result.sessions : [] };
+    }
+
+    async getCredentialContinuation(sessionId: string, signal?: AbortSignal): Promise<CredentialContinuation | null> {
+        if (this.config.deployment !== 'self_hosted') return null;
+        const response = await this.request<{ continuation: unknown }>({
+            method: 'GET',
+            path: `/sessions/${encodeURIComponent(sessionId)}/credential-continuation`,
+            operation: 'browser_tool',
+            signal,
+        });
+        const value = object(response?.continuation);
+        if (!value) return null;
+        const { pageId, frameUrl, origin, kind, expiresAt, submissionAttempted } = value;
+        if (
+            typeof pageId !== 'string' ||
+            typeof frameUrl !== 'string' ||
+            typeof origin !== 'string' ||
+            (kind !== 'password' && kind !== 'otp') ||
+            typeof expiresAt !== 'number' ||
+            !Number.isFinite(expiresAt) ||
+            typeof submissionAttempted !== 'boolean'
+        ) {
+            throw new SteelToolError('The browser returned invalid credential continuation state.', {
+                code: 'steel_error',
+            });
+        }
+        return { pageId, frameUrl, origin, kind, expiresAt, submissionAttempted };
     }
 
     async getSession(sessionId: string, signal?: AbortSignal): Promise<SteelSession> {

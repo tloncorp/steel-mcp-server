@@ -4,6 +4,7 @@ import type { ServerContext } from '@modelcontextprotocol/server';
 import { trace } from '@opentelemetry/api';
 import { z } from 'zod';
 import type { ServerDeps, ToolHost } from '../context.js';
+import { CREDENTIAL_CONTINUATION_GUIDANCE, credentialContinuation } from '../credential-continuation.js';
 import { SteelToolError } from '../errors.js';
 import { type HandoffState, resolveHumanHandoff } from '../mrtr.js';
 import { ACTIONS, type ActRequest, type BrowserPage } from '../page.js';
@@ -145,21 +146,26 @@ export function registerSnapshot(host: ToolHost, deps: ServerDeps): void {
                 .strict(),
         },
         async (args, ctx) =>
-            withPage(deps, 'browser_snapshot', ctx.mcpReq, args.session_id, async page => {
+            withPage(deps, 'browser_snapshot', ctx.mcpReq, args.session_id, async (page, record) => {
                 const sections = await snapshotSection(page, deps, {
                     interactiveOnly: args.interactive_only ?? true,
                     maxTokens: args.max_tokens,
                     cursor: args.cursor,
                 });
                 const snapshot = page.pageState.lastSnapshot;
+                const continuation = await credentialContinuation(deps, record, page, ctx.mcpReq.signal);
                 return successResult(
                     {
-                        result: `Read the page structure: ${snapshot?.nodes.filter(node => node.ref).length ?? 0} targetable elements.`,
+                        result:
+                            `Read the page structure: ${snapshot?.nodes.filter(node => node.ref).length ?? 0} targetable elements.` +
+                            (continuation ? ` ${CREDENTIAL_CONTINUATION_GUIDANCE}` : ''),
                         pageState: sections.pageState,
                         snapshot: sections.snapshot,
                         pagination: sections.pagination,
                     },
-                    undefined
+                    continuation
+                        ? { credential_state: 'filled', submission_attempted: continuation.submissionAttempted }
+                        : undefined
                 );
             })
     );

@@ -250,7 +250,7 @@ export interface InteractiveBlock {
 const CAPTCHA_WIDGET_MARKERS: ReadonlyArray<{ vendor: string; marker: string; test: RegExp }> = [
     { vendor: 'reCAPTCHA', marker: 'recaptcha', test: /recaptcha|i'?m not a robot/i },
     { vendor: 'hCaptcha', marker: 'hcaptcha', test: /hcaptcha/i },
-    { vendor: 'Cloudflare Turnstile', marker: 'turnstile', test: /turnstile/i },
+    { vendor: 'Cloudflare Turnstile', marker: 'turnstile', test: /turnstile|cloudflare security challenge/i },
     {
         vendor: 'human-verification',
         marker: 'human_check',
@@ -333,7 +333,11 @@ const MAX_INTERSTITIAL_TEXT = 3_000;
 
 /** True when the page is the block and nothing else, judged on structure rather than wording. */
 function isInterstitial(evidence: HandoffBlockEvidence): boolean {
-    const operable = evidence.controls.filter(control => control.interactable).length;
+    // Hit-testable, unnamed layout wrappers do not add a task the person can do.
+    // Named custom controls still count even when they omit a semantic role.
+    const operable = evidence.controls.filter(
+        control => control.interactable && (control.role !== 'generic' || control.name.trim().length > 0)
+    ).length;
     return operable <= MAX_INTERSTITIAL_CONTROLS && (evidence.text?.length ?? 0) <= MAX_INTERSTITIAL_TEXT;
 }
 

@@ -251,6 +251,15 @@ export interface SessionLogTimeline {
  * The Steel REST surface this server depends on. Tools depend on this interface, never on a
  * concrete transport, so unit tests inject a fake at exactly this boundary.
  */
+export interface CredentialContinuation {
+    pageId: string;
+    frameUrl: string;
+    origin: string;
+    kind: 'password' | 'otp';
+    expiresAt: number;
+    submissionAttempted: boolean;
+}
+
 export interface SteelApi {
     scrape(request: ScrapeRequest, signal?: AbortSignal): Promise<ScrapeResponse>;
     screenshot(request: ArtifactRequest, signal?: AbortSignal): Promise<ArtifactResponse>;
@@ -259,6 +268,7 @@ export interface SteelApi {
     releaseSession(sessionId: string, signal?: AbortSignal): Promise<void>;
     listSessions(request: SessionListRequest, signal?: AbortSignal): Promise<SessionListResponse>;
     getSession(sessionId: string, signal?: AbortSignal): Promise<SteelSession>;
+    getCredentialContinuation(sessionId: string, signal?: AbortSignal): Promise<CredentialContinuation | null>;
     getSessionHls(sessionId: string, signal?: AbortSignal): Promise<string>;
     getDetails(signal?: AbortSignal): Promise<AccountDetails>;
     listProfiles(signal?: AbortSignal): Promise<SteelProfileSummary[]>;

@@ -2,6 +2,7 @@
 // ABOUTME: second browser, generates credential text, or releases the caller's session.
 import { z } from 'zod';
 import type { ServerDeps, ToolHost } from '../context.js';
+import { CREDENTIAL_CONTINUATION_GUIDANCE, credentialContinuation } from '../credential-continuation.js';
 import { SteelToolError } from '../errors.js';
 import { decide } from '../jev.js';
 import { inspectInteractiveBlock } from '../mrtr.js';
@@ -19,11 +20,13 @@ interface Candidate {
     label: string;
     action?: ActRequest;
     confirmation?: boolean;
+    credentialSubmission?: boolean;
 }
 const consequential =
     /\b(buy|purchase|pay|place order|checkout|delete|remove account|send|publish|subscribe|unsubscribe|transfer|confirm|book now|reserve now|sign out|log out|save changes)\b/i;
 const navigationButton =
     /^(search|go|next|previous|back|continue|show|view|see|find|filter|sort|apply filters|load more|accept cookies|reject cookies|close|open|menu)\b/i;
+const authenticationButton = /^(?:log\s*in|sign\s*in|continue|next|verify|submit)(?:\s|$)/i;
 
 /** No field values or capability URLs are sent as page evidence. */
 export function runEvidence(snapshot: PageSnapshot): string {
@@ -31,7 +34,17 @@ export function runEvidence(snapshot: PageSnapshot): string {
         .filter(node => !node.sensitive)
         .slice(0, 160)
         .map(node => {
-            const state = ['selected', 'disabled', 'checked', 'expanded', 'pressed', 'readonly']
+            const state = [
+                'selected',
+                'disabled',
+                'checked',
+                'expanded',
+                'pressed',
+                'readonly',
+                'invalid',
+                'required',
+                'busy',
+            ]
                 .flatMap(key => {
                     const value = node.properties?.[key];
                     return typeof value === 'boolean' || value === 'mixed' ? [`[${key}=${value}]`] : [];
@@ -43,7 +56,11 @@ export function runEvidence(snapshot: PageSnapshot): string {
         .slice(0, 12_000);
 }
 
-export function runCandidates(snapshot: PageSnapshot, inputs: RunInput[]): Map<string, Candidate> {
+export function runCandidates(
+    snapshot: PageSnapshot,
+    inputs: RunInput[],
+    continueLogin = false
+): Map<string, Candidate> {
     const candidates = new Map<string, Candidate>();
     for (const node of snapshot.nodes) {
         if (!node.ref || !node.interactive || node.sensitive || candidates.size >= 220) continue;
@@ -60,10 +77,14 @@ export function runCandidates(snapshot: PageSnapshot, inputs: RunInput[]): Map<s
                 });
             }
         } else if (['link', 'button', 'tab', 'menuitem', 'option', 'combobox'].includes(role)) {
+            const credentialSubmission = continueLogin && role === 'button' && authenticationButton.test(node.name);
             candidates.set(`click_${candidates.size}`, {
                 label: `Click ${label}`,
                 action: { action: 'click', target: node.ref },
-                confirmation: consequential.test(node.name) || (role === 'button' && !navigationButton.test(node.name)),
+                confirmation:
+                    consequential.test(node.name) ||
+                    (role === 'button' && !navigationButton.test(node.name) && !credentialSubmission),
+                ...(credentialSubmission ? { credentialSubmission: true } : {}),
             });
         }
     }
@@ -138,6 +159,7 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                 let errorCode: string | undefined;
                 let repeated = 0;
                 let previous = '';
+                let loginAttempted = false;
                 const check = async () => {
                     signal.throwIfAborted();
                     await deps.registry.resolveForAgent(args.session_id, deps.principal);
@@ -148,18 +170,20 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                     for (let step = 1; step <= args.max_steps; step++) {
                         await check();
                         const block = await inspectInteractiveBlock(page);
-                        if (block.verdict) {
+                        const continuation = await credentialContinuation(deps, record, page, signal);
+                        if (block.verdict && !(block.verdict.block.kind === 'login_wall' && continuation)) {
                             status = 'needs_handoff';
                             break;
                         }
                         snapshot = await page.snapshot({ interactiveOnly: false });
-                        if (snapshot.nodes.some(node => node.sensitive && node.ref)) {
+                        const hasSensitiveFields = snapshot.nodes.some(node => node.sensitive && node.ref);
+                        if (hasSensitiveFields && !continuation) {
                             status = 'needs_handoff';
                             break;
                         }
                         await check();
                         const evidence = runEvidence(snapshot);
-                        const candidates = runCandidates(snapshot, args.inputs ?? []);
+                        const candidates = runCandidates(snapshot, args.inputs ?? [], continuation !== null);
                         const criteria = Object.fromEntries(
                             [...candidates].map(([id, candidate]) => [id, candidate.label])
                         );
@@ -176,6 +200,12 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                                     page: evidence,
                                     inputs: (args.inputs ?? []).map(({ field, value }) => ({ field, value })),
                                     history: steps.slice(-6),
+                                    ...(continuation
+                                        ? {
+                                              credential_continuation: CREDENTIAL_CONTINUATION_GUIDANCE,
+                                              submission_attempted: continuation.submissionAttempted,
+                                          }
+                                        : {}),
                                 },
                                 criteria,
                                 signal,
@@ -209,7 +239,7 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                             break;
                         }
                         if (answers.action.choice === 'done') {
-                            status = answers.goal_done.noul >= 0.85 ? 'done' : 'needs_review';
+                            status = answers.goal_done.noul >= 0.85 && !hasSensitiveFields ? 'done' : 'needs_review';
                             break;
                         }
                         if (answers.action.choice === 'needs_input') {
@@ -244,8 +274,24 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                             break;
                         }
                         await check();
+                        if (chosen.credentialSubmission) {
+                            if (loginAttempted) {
+                                status = 'needs_review';
+                                break;
+                            }
+                            const liveReceipt = await credentialContinuation(deps, record, page, signal);
+                            if (
+                                !liveReceipt ||
+                                !chosen.action?.target ||
+                                !(await page.isCredentialControl(chosen.action.target, liveReceipt.kind))
+                            ) {
+                                status = 'needs_handoff';
+                                break;
+                            }
+                        }
                         if (chosen.action) {
                             trace.attempted = true;
+                            if (chosen.credentialSubmission) loginAttempted = true;
                             await page.act(chosen.action);
                             trace.executed = true;
                         }

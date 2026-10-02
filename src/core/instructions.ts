@@ -29,7 +29,7 @@ Create one session with browser_session_create; omit timeout_ms to use the deplo
 
 Inspect status and evidence; done is not proof of success. On uncertain, needs_review, stuck, page_changed or no useful action, switch to browser_snapshot/browser_find and browser_act on the same session. Use observed refs, not guessed selectors. Retry browser_run only after the page, inputs or goal changes. Do not replay completed actions. For needs_input supply non-secret text. For needs_confirmation obtain required approval; direct tools never bypass safety stops.
 
-For needs_handoff, use browser_session_handoff on the same session. Do not act or release during human control; wait for Hand back and then re-read. Do not request secrets in chat.
+For needs_handoff, use browser_session_handoff on the same session. Do not act or release during human control; wait for Hand back and re-read. A credential_state of filled means resume the login with browser_run, not that sign-in succeeded. Never read or retype filled secrets; ask again only for rejected or new input.
 
 Sessions reuse this credential's durable login profile on self-hosted deployments. Keep the session through handoff and continuation; browser_run does not close it. Hard expiry still applies. Release with browser_session_release when finished.
 

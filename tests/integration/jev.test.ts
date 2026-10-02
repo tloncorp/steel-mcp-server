@@ -57,6 +57,93 @@ function searchPage() {
 }
 
 describe('Jev browser runner', () => {
+    it('continues a securely filled login and never sends its secret to the decision model', async () => {
+        const deps = depsFor(() => {
+            const page = loginWallPage();
+            page.root.children![1]!.inputValue = 'supersecret';
+            return page;
+        });
+        const { client } = await connect(deps);
+        const record = await session(deps);
+        const page = await deps.pool.page(record.steelSessionId);
+        vi.spyOn(deps.api, 'getCredentialContinuation').mockResolvedValue({
+            pageId: 'target',
+            frameUrl: 'https://app.test/login',
+            origin: 'https://app.test',
+            kind: 'password',
+            expiresAt: Date.now() + 60_000,
+            submissionAttempted: false,
+        });
+        vi.spyOn(page, 'matchesCredentialContinuation').mockResolvedValue(true);
+        vi.spyOn(page, 'isCredentialControl').mockResolvedValue(true);
+        const act = vi.spyOn(page, 'act').mockResolvedValue({
+            summary: 'Clicked Sign in.',
+            changeDescription: 'No navigation yet.',
+            change: { navigated: false, navigatedToUrl: undefined, domMutated: true, timedOut: false },
+        });
+        deps.jevFetch = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+            const body = JSON.parse(String(init?.body));
+            expect(body.state.credential_continuation).toContain('not proof of sign-in');
+            expect(String(init?.body)).not.toContain('supersecret');
+            const action = Object.entries(body.questions.action.criteria).find(
+                ([, label]) => label === 'Click button Sign in'
+            )?.[0];
+            expect(action).toBeTruthy();
+            return decision(action!);
+        });
+        const result = await client.callTool({
+            name: 'browser_run',
+            arguments: {
+                session_id: record.handle,
+                task: 'Finish the authorized login',
+                max_steps: 1,
+            },
+        });
+        expect(result.structuredContent).toMatchObject({ status: 'max_steps', steps: [{ executed: true }] });
+        expect(page.isCredentialControl).toHaveBeenCalled();
+        expect(act).toHaveBeenCalledWith(expect.objectContaining({ action: 'click' }));
+    });
+
+    it('does not call a filled login page done or approve an unrelated form', async () => {
+        const deps = depsFor(loginWallPage);
+        const { client } = await connect(deps);
+        const record = await session(deps);
+        const page = await deps.pool.page(record.steelSessionId);
+        vi.spyOn(deps.api, 'getCredentialContinuation').mockResolvedValue({
+            pageId: 'target',
+            frameUrl: 'https://app.test/login',
+            origin: 'https://app.test',
+            kind: 'password',
+            expiresAt: Date.now() + 60_000,
+            submissionAttempted: true,
+        });
+        vi.spyOn(page, 'matchesCredentialContinuation').mockResolvedValue(true);
+        vi.spyOn(page, 'isCredentialControl').mockResolvedValue(false);
+        deps.jevFetch = vi.fn<typeof fetch>().mockResolvedValue(decision('done'));
+        const result = await client.callTool({
+            name: 'browser_run',
+            arguments: {
+                session_id: record.handle,
+                task: 'Finish the authorized login',
+            },
+        });
+        expect(result.structuredContent).toMatchObject({ status: 'needs_review', steps: [{ executed: false }] });
+        deps.jevFetch = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+            const body = JSON.parse(String(init?.body));
+            const action = Object.entries(body.questions.action.criteria).find(
+                ([, label]) => label === 'Click button Sign in'
+            )?.[0];
+            return decision(action!);
+        });
+        const blocked = await client.callTool({
+            name: 'browser_run',
+            arguments: {
+                session_id: record.handle,
+                task: 'Finish the authorized login',
+            },
+        });
+        expect(blocked.structuredContent).toMatchObject({ status: 'needs_handoff', steps: [{ executed: false }] });
+    });
     it('is advertised only with operator inference credentials and prefers run in instructions', async () => {
         const disabled = await connect(testDeps());
         expect((await disabled.client.listTools()).tools.map(tool => tool.name)).not.toContain('browser_run');

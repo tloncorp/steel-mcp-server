@@ -30,6 +30,18 @@ function snapshot(nodes: SnapshotNode[]): PageSnapshot {
 }
 
 describe('Jev configuration and action space', () => {
+    it('allows login controls only with a trusted fill receipt, without approving account changes', () => {
+        const page = snapshot([
+            node({ role: 'button', name: 'Sign in' }),
+            node({ ref: '@e2', role: 'button', name: 'Continue and pay' }),
+        ]);
+        expect(runCandidates(page, []).get('click_0')?.confirmation).toBe(true);
+        expect(runCandidates(page, [], true).get('click_0')).toMatchObject({
+            confirmation: false,
+            credentialSubmission: true,
+        });
+        expect(runCandidates(page, [], true).get('click_1')?.confirmation).toBe(true);
+    });
     it('uses only operator inference credentials with the literal OpenRouter model alias', () => {
         expect(loadConfig({ STEEL_LOCAL: 'true' }).jev).toBeUndefined();
         expect(loadConfig({ STEEL_LOCAL: 'true', OPENROUTER_API_KEY: '  ' }).jev).toBeUndefined();

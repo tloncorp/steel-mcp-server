@@ -145,6 +145,7 @@ describe('detectInteractiveBlock', () => {
         for (const [text, vendor] of [
             ["checkbox I'm not a robot", 'reCAPTCHA'],
             ['iframe hCaptcha challenge', 'hCaptcha'],
+            ['Iframe Widget containing a Cloudflare security challenge', 'Cloudflare Turnstile'],
             ['Verify you are human', 'human-verification'],
         ] as const) {
             expect(detectInteractiveBlock({ finalUrl: 'https://x.test/', text })).toMatchObject({
@@ -227,6 +228,34 @@ function handsOff(evidence: HandoffBlockEvidence): boolean {
 }
 
 describe('assessInteractiveBlock', () => {
+    it('recognizes a security challenge alongside a login form and unnamed layout wrappers', () => {
+        const controls: FixtureControl[] = [
+            { role: 'generic', name: '', interactable: true },
+            { role: 'link', name: 'Site home', interactable: true },
+            { role: 'textbox', name: 'Username', interactable: true },
+            { role: 'textbox', name: 'Password', sensitive: true, interactable: true },
+            { role: 'button', name: 'Toggle password visibility', interactable: true },
+            { role: 'checkbox', name: 'Remember me', interactable: true },
+            { role: 'link', name: 'Forgot password?', interactable: true },
+            { role: 'button', name: 'Log In', interactable: true },
+            ...['Apple', 'Google', 'Facebook'].map(name => ({
+                role: 'link',
+                name: `Log in with ${name}`,
+                interactable: true,
+            })),
+            { role: 'link', name: 'Sign up', interactable: true },
+            { role: 'button', name: 'Close', interactable: true },
+            { role: 'Iframe', name: 'Widget containing a Cloudflare security challenge' },
+            { role: 'StaticText', name: 'Please complete the security check to continue.' },
+        ];
+        expect(assessInteractiveBlock(pageEvidence({ title: 'Login', controls }))).toMatchObject({
+            block: { kind: 'captcha', vendor: 'Cloudflare Turnstile' },
+            clearableByPerson: true,
+        });
+        controls[0]!.name = 'Another custom action';
+        expect(assessInteractiveBlock(pageEvidence({ title: 'Login', controls }))).toBeNull();
+    });
+
     it('hands off a challenge whose widget is on an otherwise empty page', () => {
         const verdict = assessInteractiveBlock(
             pageEvidence({
