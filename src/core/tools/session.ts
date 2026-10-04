@@ -444,9 +444,12 @@ async function newestLiveSession(deps: ServerDeps): Promise<HandleRecord> {
         .sort((left, right) => right.createdAt - left.createdAt);
     const newest = live[0];
     if (!newest) {
-        throw new SteelToolError('There is no live browser session to show. Call browser_session_create to start one.', {
-            code: 'session_expired',
-        });
+        throw new SteelToolError(
+            'There is no live browser session to show. Call browser_session_create to start one.',
+            {
+                code: 'session_expired',
+            }
+        );
     }
     return newest;
 }
@@ -550,6 +553,12 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                     );
                 }
 
+                if (session.id !== record.steelSessionId || session.status !== 'live') {
+                    throw new SteelToolError('This browser session is not live. Start a new session.', {
+                        code: 'invalid_argument',
+                    });
+                }
+
                 const cdpUrl = session.websocketUrl;
                 if (!cdpUrl) {
                     // Never fall back to the configured connect URL: that one carries STEEL_API_KEY,
@@ -563,13 +572,14 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
 
                 const viewport = readViewport(session.dimensions);
                 return successResult(
-                    // Deliberately says nothing else. The URL below is a drive-capable credential and
-                    // belongs only in structured data, which the app reads and the model does not.
+                    // Connection capabilities stay in structured data for trusted UI/tool adapters;
+                    // those adapters must not relay this result into model-authored commands.
                     { result: 'Live view connection details for this session.' },
                     {
                         // Named so a viewer that resolved its own session knows which one it got,
                         // and can say so rather than stream an unidentified browser.
                         session_id: record.handle,
+                        ...(session.sessionViewerUrl ? { viewer_url: session.sessionViewerUrl } : {}),
                         cdp_url: cdpUrl,
                         ...(viewport ? { viewport } : {}),
                         expires_at: new Date(record.expiresAt).toISOString(),

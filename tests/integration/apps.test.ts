@@ -6,7 +6,7 @@ import {
     InMemoryTransport,
     PROTOCOL_VERSION_META_KEY,
 } from '@modelcontextprotocol/server';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     SESSION_VIEWER_HTML,
     SESSION_VIEWER_MIME_TYPE,
@@ -71,6 +71,7 @@ async function newSession(harness: Harness): Promise<string> {
 
 interface LiveView {
     session_id?: string;
+    viewer_url?: string;
     cdp_url?: string;
     viewport?: { width: number; height: number };
     expires_at?: string;
@@ -254,6 +255,43 @@ describe('browser_session_create', () => {
 });
 
 describe('browser_session_live_view', () => {
+    it('resolves a fresh viewer URL from the authorized handle without putting it in text', async () => {
+        const harness = await connect();
+        const handle = await newSession(harness);
+        const [record] = await harness.deps.registry.list(harness.deps.principal);
+        const urls = ['https://viewer.test/s/first.signature', 'https://viewer.test/s/fresh.signature'];
+        const read = vi.spyOn(harness.deps.api, 'getSession');
+        for (const viewerUrl of urls) {
+            read.mockResolvedValueOnce({
+                id: record!.steelSessionId,
+                status: 'live',
+                sessionViewerUrl: viewerUrl,
+                websocketUrl: 'wss://viewer.test/cdp?cap=private',
+            });
+            const { result, structured } = await liveView(harness, handle);
+            expect(structured?.session_id).toBe(handle);
+            expect(structured?.viewer_url).toBe(viewerUrl);
+            expect(textOf(result)).not.toContain(viewerUrl);
+        }
+        expect(read).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['released', 'failed'])('refuses a session the browser reports as %s', async status => {
+        const harness = await connect();
+        const handle = await newSession(harness);
+        const [record] = await harness.deps.registry.list(harness.deps.principal);
+        vi.spyOn(harness.deps.api, 'getSession').mockResolvedValue({
+            id: record!.steelSessionId,
+            status,
+            sessionViewerUrl: 'https://viewer.test/s/private.signature',
+            websocketUrl: 'wss://viewer.test/cdp?cap=private',
+        });
+        const { result, structured } = await liveView(harness, handle);
+        expect(isError(result)).toBe(true);
+        expect(structured).not.toHaveProperty('viewer_url');
+        expect(textOf(result)).not.toContain('private');
+    });
+
     it('is listed, marked app-only, so a host filters it out of the agent’s tool list', async () => {
         const harness = await connect();
         const { tools } = await harness.client.listTools();
