@@ -43,7 +43,13 @@ async function rejection(work: () => Promise<unknown>): Promise<SteelToolError> 
 describe('the tool weight table', () => {
     it('charges session-creating and CDP-driving tools more than the stateless reads', () => {
         const stateless = Math.max(toolCost('browser_scrape'), toolCost('browser_screenshot'), toolCost('browser_pdf'));
-        for (const tool of ['browser_session_create', 'browser_navigate', 'browser_act', 'browser_snapshot', 'browser_batch']) {
+        for (const tool of [
+            'browser_session_create',
+            'browser_navigate',
+            'browser_act',
+            'browser_snapshot',
+            'browser_batch',
+        ]) {
             expect(toolCost(tool), `${tool} must cost more than a stateless read`).toBeGreaterThan(stateless);
         }
         expect(toolCost('browser_session_create')).toBe(Math.max(...Object.values(TOOL_COSTS)));

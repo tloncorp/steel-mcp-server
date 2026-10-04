@@ -222,11 +222,13 @@ backends, and a browser suite that executes the app's runtime instead of asserti
 
 ## 7. The MCPB desktop bundle
 
-Measured 2026-08-04 against `@anthropic-ai/mcpb@2.1.2`, manifest schema **v0.4**.
+Measured 2026-08-04 against `@anthropic-ai/mcpb@2.1.2`, manifest schema **v0.4**. Counts re-measured
+2026-08-24 by a full `npm run pack:mcpb` on `2.0.0-rc.9`.
 
-- **The bundle is 2.0MB packed, 8.0MB unpacked, 938 files.** It carries four dependency trees —
-  `@modelcontextprotocol/server` (with `core` beneath it), `@opentelemetry/api`, `ws`, `zod` — and
-  nothing else. `npm install` in the staging tree resolves **5 packages**.
+- **The bundle is 2.0MB packed, 8.2MB unpacked, 969 files.** It carries five dependency trees —
+  `@modelcontextprotocol/server` (with `core` beneath it), `@opentelemetry/api`, `safe-regex2`, `ws`,
+  `zod` — and nothing else. `npm install` in the staging tree resolves **7 packages**. The staged
+  server then starts over real JSON-RPC and lists 16 tools before anything is packed.
 - **Narrowing the staged `package.json` beats deleting installed directories.** Deleting
   `node_modules/ioredis` left its six dependencies behind (`redis-parser`, `redis-errors`, `denque`,
   `cluster-key-slot`, `standard-as-callback`, `debug`), and `@modelcontextprotocol/node` dragged in
@@ -261,6 +263,10 @@ after the split. Same stdio server both times.
 |---|---|---|
 | Before | 85 | **68M** |
 | After | 5 | **17M** |
+| Now (rc.9, 2026-08-24) | 7 | **17M** |
+
+`safe-regex2` and its one transitive package are the difference between the split measurement and
+today: `browser_find` needs it to accept a caller's regex without a catastrophic-backtracking risk.
 
 - **`optionalDependencies` are installed by default.** That is the whole finding. The 35M
   OpenTelemetry exporter stack was in `optionalDependencies` *specifically* to keep it out of ordinary
@@ -275,8 +281,8 @@ after the split. Same stdio server both times.
 - **`npm prune --omit=dev` removes optional peers**, so the container image — which serves either
   entrypoint — has to reinstall them by name. It reads the ranges out of `peerDependencies` so the
   two cannot drift.
-- The MCPB bundle's staged `node_modules` is also 17M; `mcpb pack` reports 8.0M unpacked because its
-  own ignore rules strip a further 817 files.
+- The MCPB bundle's staged `node_modules` is also 17M; `mcpb pack` reports 8.2M unpacked because its
+  own ignore rules strip a further 354 files.
 
 ### Three faults in the container image, none of which a green build showed
 
@@ -295,10 +301,10 @@ Dockerfile. Every one of these produced a successful `docker build`.
   ranges out before deleting the block.
 - The working order is: capture ranges → `npm pkg delete devDependencies peerDependencies
   peerDependenciesMeta` → `npm prune --omit=dev` → `npm install --no-save <the two peers>`. Result:
-  **178MB image, 22M `node_modules`**, holding exactly the four production dependencies and the two
-  peers `hosted.ts` statically imports.
-- Verified in the image: stdio lists 14 tools over real JSON-RPC; `dist/hosted.js` answers `/healthz`
-  200; and with `OTEL_EXPORTER_OTLP_ENDPOINT` set but no exporter installed it logs
+  **178MB image, 22M `node_modules`**, holding exactly the production dependencies and the two peers
+  `hosted.ts` statically imports.
+- Verified in the image: stdio lists its whole tool table over real JSON-RPC; `dist/hosted.js`
+  answers `/healthz` 200; and with `OTEL_EXPORTER_OTLP_ENDPOINT` set but no exporter installed it logs
   "Tracing was requested but could not start" exactly once and serves anyway. CI now runs all three.
 
 ## 8. Process notes
@@ -314,8 +320,10 @@ Dockerfile. Every one of these produced a successful `docker build`.
   gitignored; removing a worktree while keeping its branch restores the check.
 - **This repo has no git hooks** (no `.husky`, no `core.hooksPath`, nothing in `.git/hooks`), so the
   npm scripts are the only gate. That is how an unformatted merge landed.
-- **No lockfile is committed** (`package-lock.json` is gitignored), and it has already caused
-  observable drift: `biome.json` pins schema 2.5.5 while `^2.5.5` installs 2.5.6.
+- **An untracked lockfile caused observable drift, and the lockfile now closes it.** With
+  `package-lock.json` outside git, `biome.json` pinned schema 2.5.5 while `^2.5.5` installed 2.5.6.
+  The lockfile is tracked now and every clean install reads it (`npm ci` in CI and the Docker
+  builder); the schema pin and the installed linter both read 2.5.6.
 
 ### Continuation retention decision (2026-08-13)
 
@@ -341,7 +349,7 @@ deployment sitting behind a Traefik reverse proxy.
   brand-new key registers without a restart was *not* established, which is the standing caveat on
   the finding above.
 - **`tools/list` is not evidence that a credential works.** It never calls Steel, so a bridge that
-  failed to substitute `${STEEL_AUTH_HEADER}` still lists all fourteen tools and looks healthy. Only
+  failed to substitute `${STEEL_AUTH_HEADER}` still lists every tool and looks healthy. Only
   a tool that reaches Steel — `browser_scrape` is the cheapest, since it starts no session —
   distinguishes a live credential from a literal `${...}` sent as a bearer token.
 - **A proxy's port field is not the public port.** Coolify's domain field takes `https://host:8080`
@@ -350,3 +358,60 @@ deployment sitting behind a Traefik reverse proxy.
   returns `403 Invalid Host` means `STEEL_ALLOWED_HOSTS` disagrees with the Host the proxy forwards.
   `/healthz` is answered ahead of the allowlist precisely so a probe on an IP still passes, which is
   what lets the two diverge.
+
+## 10. What CDP reports about frames, and where an iframe's content really sits
+
+Measured 2026-08-21 against Google Chrome 148 headless, over a page nesting three same-origin
+documents, plus a live third-party form-engine page in the wild. Every claim below was checked in both
+directions: the fixture was scrolled and unscrolled, and the computed result compared against
+`DOM.getBoxModel` on the same node.
+
+- **`Accessibility.getFullAXTree` answers for exactly one frame.** Called with no `frameId` it
+  returns the page's own document and stops at every `<iframe>`, which appears as a childless
+  `Iframe` node — same-origin or not. Called with `frameId` it returns that frame and stops at the
+  same boundary. An unknown frame is an error, not an empty tree: `Frame with the given frameId is
+  not found.` Reading a page with frames therefore takes one call per frame.
+- **`DOMSnapshot.captureSnapshot` already returns every same-process document**, each carrying its
+  own `frameId`, `scrollOffsetX/Y` and node table, and `nodes.contentDocumentIndex` names the
+  document each `<iframe>` holds by its index in that same list. So the frame tree, the geometry and
+  the owner links all arrive in the call the snapshot pipeline already makes; `Page.getFrameTree` and
+  `DOM.getFrameOwner` are not needed for it, and neither is `DOM.enable`.
+- **`layout.bounds` are per-document, unscrolled coordinates.** Scrolling the top page, a middle
+  frame and an inner frame by 40, 45 and 50 pixels left every `bounds` entry unchanged, while
+  `DOM.getBoxModel` for the same node moved by 135 — the sum of all three.
+- **A child document's origin in the page** is the owning element's content-box corner, accumulated
+  down the chain, less that child's own scroll:
+
+  ```
+  origin(top) = (0, 0)
+  origin(c)   = origin(parent) + ownerBounds.origin + borderWidth + padding - scroll(c)
+  ```
+
+  On the three-deep fixture this reproduced `DOM.getBoxModel` exactly (`80.4375, 180.6875`), and the
+  difference from the viewport-relative box model was exactly the summed scroll. The border term is
+  not optional: Chrome's default `<iframe>` border is 2px, so omitting it is wrong on almost every
+  page.
+- **Geometry and input already work with a child frame's `backendNodeId` on the page session.**
+  `DOM.getBoxModel` returns top-level coordinates, `DOM.getNodeForLocation` at that point hit-tests
+  back to the same node, and a dispatched pointer event lands in the frame. No per-frame session and
+  no coordinate translation are needed to act on what the descent finds.
+- **Change detection and identity do not cross the frame boundary on their own.** Three things
+  assume the top document unless told otherwise, and the action path now carries the ref's frame
+  to tell them: the settle pass's `MutationObserver` is installed by `Runtime.evaluate` in the top
+  document, so a change confined to a frame is invisible to it (the change description says so
+  instead of reporting nothing changed); `Page.frameStartedNavigating` for a subframe never leads to
+  `Page.loadEventFired`, so a frame that submits is waited on through `Page.frameStoppedLoading`;
+  and `Runtime.callFunctionOn` refuses an argument from another document (`Argument should belong to
+  the same JavaScript world as target object`), which the containment probe treats as the blocker
+  it is. Ref staleness is keyed on the loader of the frame's own document, which `Page.getFrameTree`
+  reports under `childFrames[].frame.loaderId`, so a frame that loads a new document is a
+  `frame_navigated` stale ref while the page's loader is unchanged.
+- **Out-of-process frames are a different problem.** With site isolation on, a cross-origin frame is
+  a separate target: it is absent from `Page.getFrameTree` on the page session and absent from the
+  DOM snapshot's documents, so none of the above reaches it. Its `src` attribute is still in the
+  parent document, which is enough to navigate to it directly.
+- **The form-engine page that prompted this is same-origin.** A hosted form engine of the common
+  shape — `…/service/<name>` embedding `…/render/?iframe_id=…` on the **same host**, which then writes
+  a second frame from script — puts 657 AX nodes behind one `Iframe` leaf. What looked like a
+  cross-origin problem was only ever the missing descent. `tests/browser/frame-snapshot.browser.test.ts`
+  reproduces that shape end to end.

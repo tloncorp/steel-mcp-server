@@ -26,6 +26,7 @@ function snapshot(nodes: SnapshotNode[]): PageSnapshot {
         nodes,
         text: '',
         truncated: false,
+        unreadableFrames: 0,
     };
 }
 

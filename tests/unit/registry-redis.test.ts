@@ -1,6 +1,6 @@
 // ABOUTME: Unit tests for the Redis-backed handle registry: the same state machine as the in-memory
 // ABOUTME: backend, plus the multi-replica behaviour a shared store adds — handoff and concurrent reaps.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SteelToolError } from '../../src/core/errors.js';
 import { principalFromCredential, type RegistryDeps } from '../../src/core/registry.js';
 import { RedisHandleRegistry } from '../../src/core/registry-redis.js';
@@ -296,6 +296,55 @@ describe('RedisHandleRegistry.touch', () => {
 });
 
 describe('RedisHandleRegistry.release', () => {
+    it.each([
+        ['explicit', 'capacity'],
+        ['explicit', 'profile-writer'],
+        ['reap', 'capacity'],
+        ['reap', 'profile-writer'],
+    ] as const)('retains retryable records when %s cleanup fails in %s', async (path, ledger) => {
+        const errors: unknown[] = [];
+        const { registry, store, clock } = harness({ onReapError: error => errors.push(error) });
+        const until = clock.ms + 60_000;
+        await registry.reserveSessionSlot(ORG_A, 'steel-1', until, 1);
+        await registry.reserveProfileWriter(ORG_A, 'profile-1', 'steel-1', until);
+        const { handle } = await registry.create({
+            principal: ORG_A,
+            steelSessionId: 'steel-1',
+            expiresAt: until,
+            mitigation: { persistProfile: true, profileId: 'profile-1' },
+        });
+        const original = store.compareDelete.bind(store);
+        let fail = true;
+        vi.spyOn(store, 'compareDelete').mockImplementation(async (key, expected) => {
+            if (fail && key.includes(`:${ledger}:`)) {
+                fail = false;
+                throw new Error('transient ledger failure');
+            }
+            return original(key, expected);
+        });
+
+        if (path === 'explicit') {
+            await expect(registry.release(handle, ORG_A, 'explicit')).rejects.toThrow('transient ledger failure');
+        } else {
+            expect(await registry.reap({ idleMs: 0 })).toBe(0);
+            expect(errors).toHaveLength(1);
+        }
+        const remaining = await registry.list(ORG_A);
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0]?.releasing).toBeFalsy();
+        expect(registry.releaseCounts()).toEqual({ explicit: 0, stream_close: 0, idle: 0, hard_expiry: 0 });
+
+        // A different replica can finish immediately, without waiting for either ledger's TTL.
+        const retry = harness({ store, clock }).registry;
+        expect(await retry.reap({ idleMs: 0 })).toBe(1);
+        expect(retry.releaseCounts().idle).toBe(1);
+        expect(await retry.list(ORG_A)).toEqual([]);
+        expect(store.valueKeys()).toEqual([]);
+        expect(store.setMembers()).toEqual({});
+        expect(await retry.reserveSessionSlot(ORG_A, 'steel-2', until, 1)).toBe(true);
+        expect(await retry.reserveProfileWriter(ORG_A, 'profile-1', 'steel-2', until)).toBe(true);
+    });
+
     it('releases the Steel session and forgets the handle, indexes included', async () => {
         const { registry, store, clock, released } = harness();
         const { handle } = await registry.create({
@@ -684,8 +733,7 @@ describe('RedisHandleRegistry across replicas', () => {
     });
 
     it('counts one release when two replicas sweep the same handle at once', async () => {
-        // No distributed lock: whichever replica deletes the record wins, and the loser must not
-        // count a release it did not perform.
+        // Atomic SET-NX release fencing admits one sweep; the loser neither releases nor counts.
         const { first, second, store, clock } = twoReplicas();
         await first.registry.create({ principal: ORG_A, steelSessionId: 'steel-1', expiresAt: clock.ms + 600_000 });
         clock.advance(200_000);
@@ -695,10 +743,7 @@ describe('RedisHandleRegistry across replicas', () => {
             second.registry.reap({ idleMs: 120_000 }),
         ]);
 
-        expect(
-            [...first.released, ...second.released],
-            'the two sweeps did not overlap, so the race was never exercised'
-        ).toEqual(['steel-1', 'steel-1']);
+        expect([...first.released, ...second.released]).toEqual(['steel-1']);
         expect(reapedByFirst + reapedBySecond, 'the same handle was reaped twice').toBe(1);
         const counts = first.registry.releaseCounts().idle + second.registry.releaseCounts().idle;
         expect(counts, 'two replicas both counted the one release').toBe(1);

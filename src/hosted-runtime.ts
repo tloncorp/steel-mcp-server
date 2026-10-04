@@ -4,6 +4,7 @@ import type { RequestStateCodec } from '@modelcontextprotocol/server';
 import type { ArtifactPublisher } from './core/artifacts.js';
 import { loadRegistryConfig, type SteelConfig } from './core/config.js';
 import { CdpSessionPool, type ServerDeps, type SessionPool } from './core/context.js';
+import { SteelToolError } from './core/errors.js';
 import { createHandoffCodec, type HandoffState } from './core/mrtr.js';
 import { InMemoryRateLimiter, type RateLimiter } from './core/rate-limit.js';
 import { connectRedis, type RedisConnection } from './core/redis.js';
@@ -36,9 +37,16 @@ export interface HostedRuntimeOptions {
     onReleased?: ((cause: ReleasePath, backend: 'memory' | 'redis') => void) | undefined;
     now?: (() => Date) | undefined;
     artifacts?: ArtifactPublisher | undefined;
+    /** Maximum retained credential/client bundles in this process. New callers fail closed when full. */
+    maxTenants?: number | undefined;
+    /** Idle bundles without live sessions can be evicted by pruneIdleTenants. */
+    tenantIdleMs?: number | undefined;
 }
 
 interface TenantClients {
+    lastUsedAt: number;
+    activeTools: number;
+    retired: boolean;
     credential: string;
     config: SteelConfig;
     api: SteelApi;
@@ -75,11 +83,25 @@ export class HostedRuntime {
     private readonly createApi: (config: SteelConfig) => SteelApi;
     private readonly createPool: (config: SteelConfig, settleMultiplier: number) => SessionPool;
     private readonly now: () => Date;
+    private readonly maxTenants: number;
+    private readonly tenantIdleMs: number;
+    private pruning: Promise<number> | undefined;
+    private closed = false;
 
     constructor(private readonly options: HostedRuntimeOptions) {
         this.createApi = options.createApi ?? (config => new SteelRestClient(config));
         this.createPool = options.createPool ?? ((config, multiplier) => new CdpSessionPool(config, multiplier));
         this.now = options.now ?? (() => new Date());
+        this.maxTenants = options.maxTenants ?? 256;
+        this.tenantIdleMs = options.tenantIdleMs ?? 300_000;
+        if (
+            !Number.isSafeInteger(this.maxTenants) ||
+            this.maxTenants < 1 ||
+            !Number.isSafeInteger(this.tenantIdleMs) ||
+            this.tenantIdleMs < 1
+        ) {
+            throw new Error('Hosted tenant capacity and idle timeout must be positive integers.');
+        }
         const registryDeps: RegistryDeps = {
             releaseSteelSession: (steelSessionId, principal) => this.releaseOwnedSession(steelSessionId, principal),
             onReapError: options.onReapError,
@@ -90,6 +112,7 @@ export class HostedRuntime {
     }
 
     private tenantFor(input: RequestDepsInput): TenantClients {
+        if (this.closed) throw new Error('Hosted runtime is closed.');
         const derivedPrincipal = principalFromCredential(input.credential);
         if (input.principal !== derivedPrincipal) {
             throw new Error('Refusing hosted dependencies whose principal does not match their credential.');
@@ -100,9 +123,24 @@ export class HostedRuntime {
             if (existing.credential !== input.credential) {
                 throw new Error('A principal collision mapped two different credentials to one tenant.');
             }
+            existing.lastUsedAt = this.now().getTime();
             return existing;
         }
 
+        // Metadata-only requests need the static catalog, never a retained browser client. The
+        // beginTool guard below prevents a mismatched/malformed request from using ephemeral deps.
+        const metadataOnly = [
+            'server/discover',
+            'tools/list',
+            'resources/list',
+            'resources/read',
+            'initialize',
+        ].includes(input.request.headers.get('mcp-method') ?? '');
+        if (!metadataOnly && this.tenants.size >= this.maxTenants) {
+            throw new SteelToolError('Hosted tenant capacity is full. Retry after idle clients are reclaimed.', {
+                code: 'rate_limited',
+            });
+        }
         const config = this.options.configForCredential(input.credential);
         if (config.deployment === 'cloud' && config.apiKey !== input.credential) {
             throw new Error('Cloud configForCredential must preserve the request credential as config.apiKey.');
@@ -114,6 +152,9 @@ export class HostedRuntime {
         const api = this.createApi(config);
         const pool = this.createPool(config, settleMultiplier);
         const tenant: TenantClients = {
+            lastUsedAt: this.now().getTime(),
+            activeTools: 0,
+            retired: metadataOnly,
             credential: input.credential,
             config,
             api,
@@ -122,7 +163,7 @@ export class HostedRuntime {
             handoffState: createHandoffCodec(config.requestStateSecret),
             sessionPlanState: createSessionPlanCodec(config.requestStateSecret, input.principal),
         };
-        this.tenants.set(input.principal, tenant);
+        if (!metadataOnly) this.tenants.set(input.principal, tenant);
         return tenant;
     }
 
@@ -140,6 +181,20 @@ export class HostedRuntime {
             settleMultiplier: tenant.settleMultiplier,
             now: this.now,
             artifacts: this.options.artifacts,
+            beginTool: () => {
+                if (tenant.retired || this.closed)
+                    throw new SteelToolError('This request uses an expired client. Retry the tool call.', {
+                        code: 'rate_limited',
+                    });
+                tenant.activeTools += 1;
+                let finished = false;
+                return () => {
+                    if (finished) return;
+                    finished = true;
+                    tenant.activeTools -= 1;
+                    tenant.lastUsedAt = this.now().getTime();
+                };
+            },
         };
     };
 
@@ -163,10 +218,49 @@ export class HostedRuntime {
         await tenant.api.releaseSession(steelSessionId);
     }
 
+    /** Called by the hosted reaper; active tools and every live/pending-handoff record pin a tenant. */
+    pruneIdleTenants(): Promise<number> {
+        this.pruning ??= this.prune().finally(() => {
+            this.pruning = undefined;
+        });
+        return this.pruning;
+    }
+
+    private async prune(): Promise<number> {
+        let removed = 0;
+        for (const [principal, tenant] of this.tenants) {
+            if (tenant.activeTools || this.now().getTime() - tenant.lastUsedAt < this.tenantIdleMs) continue;
+            if ((await this.registry.list(principal)).length) continue;
+            // A tool can start while the shared registry read is in flight. Recheck before retiring.
+            if (tenant.activeTools || this.now().getTime() - tenant.lastUsedAt < this.tenantIdleMs || this.closed)
+                continue;
+            tenant.retired = true;
+            this.tenants.delete(principal);
+            await tenant.pool.closeAll();
+            removed += 1;
+        }
+        return removed;
+    }
+
     async close(): Promise<void> {
-        if (this.registry.shutdownScope === 'process_owned') await this.registry.releaseAll('stream_close');
-        await Promise.all([...this.tenants.values()].map(tenant => tenant.pool.closeAll()));
-        this.tenants.clear();
+        this.closed = true;
+        const errors: unknown[] = [];
+        if (this.pruning) await this.pruning.catch(error => errors.push(error));
+        try {
+            if (this.registry.shutdownScope === 'process_owned') await this.registry.releaseAll('stream_close');
+        } catch (error) {
+            errors.push(error);
+        } finally {
+            const results = await Promise.allSettled(
+                [...this.tenants.values()].map(tenant => {
+                    tenant.retired = true;
+                    return tenant.pool.closeAll();
+                })
+            );
+            for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
+            this.tenants.clear();
+        }
+        if (errors.length) throw new AggregateError(errors, 'Hosted cleanup could not release every resource.');
     }
 }
 

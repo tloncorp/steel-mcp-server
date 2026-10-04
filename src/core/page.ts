@@ -5,6 +5,7 @@ import {
     clickBlockedError,
     clickHitTestUnstableError,
     clickLayoutUnavailableError,
+    clickNoObservedChangeError,
     navigationFailedError,
     SteelToolError,
 } from './errors.js';
@@ -104,7 +105,7 @@ const NAMED_KEYS: Record<string, { code: string; keyCode: number; text?: string 
 
 /** Accessible names that identify a consent or cookie overlay's dismiss control. */
 const OVERLAY_DISMISS_NAMES =
-    /^(accept|agree|allow|got it|ok|okay|dismiss|close|continue|i understand|no thanks|reject)\b|cookies?$/i;
+    /^(accept(?: all)?(?: cookies)?|reject(?: all)?(?: cookies)?|got it|ok|okay|dismiss|close|i understand|no thanks)$/i;
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_INTERVAL_MS = 250;
@@ -112,6 +113,8 @@ const WAIT_POLL_INTERVAL_MS = 250;
 interface TargetHandle {
     backendNodeId: number;
     loaderId: string;
+    /** The frame holding the target when it came from a ref; a selector target is in the top document. */
+    frameId?: string | undefined;
     /** Present when the target came from a ref; used for the redaction and identity checks. */
     node?: SnapshotNode | undefined;
     describe: string;
@@ -227,7 +230,7 @@ export class BrowserPage {
      * before any observer installed afterwards could see it, and some navigation commands do not
      * resolve until the navigation they caused has already committed.
      */
-    private async beginChange(): Promise<SettleWatch> {
+    private async beginChange(target?: TargetHandle): Promise<SettleWatch> {
         const baselineMutations = await readMutationCount(this.session);
         return watchForSettle(this.session, {
             budgets: this.budgets,
@@ -235,14 +238,28 @@ export class BrowserPage {
             // Without this the frame filter never runs and an advert iframe navigating looks
             // exactly like the page itself loading.
             mainFrameId: this.mainFrameId,
+            // A form inside an iframe submits by navigating its own frame, which is the change
+            // the caller is waiting for.
+            targetFrameId: target !== undefined && this.inChildFrame(target) ? target.frameId : undefined,
         });
+    }
+
+    /** Whether the target's document is a child frame, whose DOM the settle pass does not observe. */
+    private inChildFrame(target: TargetHandle): boolean {
+        return this.mainFrameId !== undefined && target.frameId !== undefined && target.frameId !== this.mainFrameId;
     }
 
     private async settleNow(
         watch: SettleWatch,
-        focusChanged = false
+        focusChanged = false,
+        target?: TargetHandle
     ): Promise<{ change: ChangeSignal; description: string }> {
-        const change: ChangeSignal = { ...(await watch.finish()), focusChanged };
+        const frameUnobserved = target !== undefined && this.inChildFrame(target);
+        const change: ChangeSignal = {
+            ...(await watch.finish()),
+            focusChanged,
+            ...(frameUnobserved ? { frameUnobserved } : {}),
+        };
         return { change, description: describeChange(change) };
     }
 
@@ -327,21 +344,25 @@ export class BrowserPage {
     async navigate(url: string): Promise<NavigateOutcome> {
         const beforeLoader = (await this.currentFrame()).loaderId;
         const baseline = await this.beginChange();
-        const result = await this.session.send<{ errorText?: string }>('Page.navigate', { url });
-        // errorText is CDP's only failure signal. The page still ends up on Chrome's error
-        // document, so ignoring it reports a DNS or connection failure as a successful load.
-        if (result.errorText) throw navigationFailedError(url, result.errorText);
+        try {
+            const result = await this.session.send<{ errorText?: string }>('Page.navigate', { url });
+            // errorText is CDP's only failure signal. The page still ends up on Chrome's error
+            // document, so ignoring it reports a DNS or connection failure as a successful load.
+            if (result.errorText) throw navigationFailedError(url, result.errorText);
 
-        const { change, description } = await this.settleNow(baseline);
-        const frame = await this.currentFrame();
-        if (frame.loaderId && frame.loaderId !== beforeLoader) this.clearClickFailures();
-        return {
-            // The frame tree is authoritative for the main frame; the settle signal is a fallback.
-            finalUrl: frame.url || change.navigatedToUrl || url,
-            title: await this.readTitle(),
-            change,
-            changeDescription: description,
-        };
+            const { change, description } = await this.settleNow(baseline);
+            const frame = await this.currentFrame();
+            if (frame.loaderId && frame.loaderId !== beforeLoader) this.clearClickFailures();
+            return {
+                // The frame tree is authoritative for the main frame; the settle signal is a fallback.
+                finalUrl: frame.url || change.navigatedToUrl || url,
+                title: await this.readTitle(),
+                change,
+                changeDescription: description,
+            };
+        } finally {
+            baseline.dispose();
+        }
     }
 
     private async readTitle(): Promise<string> {
@@ -413,6 +434,7 @@ export class BrowserPage {
             return {
                 backendNodeId: resolved.backendNodeId,
                 loaderId: resolved.loaderId,
+                frameId: resolved.frameId,
                 node,
                 describe: `${target} (${resolved.role})`,
             };
@@ -470,6 +492,14 @@ export class BrowserPage {
         return [...unique.values()];
     }
 
+    /** Returns how far the layout viewport is scrolled, in CSS pixels. */
+    private async pageScroll(): Promise<Point> {
+        const metrics = await this.session.send<{ cssLayoutViewport?: { pageX?: number; pageY?: number } }>(
+            'Page.getLayoutMetrics'
+        );
+        return { x: metrics.cssLayoutViewport?.pageX ?? 0, y: metrics.cssLayoutViewport?.pageY ?? 0 };
+    }
+
     /** Returns the centre for actions such as hover that intentionally have one pointer position. */
     private async centreOf(handle: TargetHandle): Promise<Point> {
         const point = (await this.candidatePoints(handle.backendNodeId))?.[0];
@@ -486,13 +516,16 @@ export class BrowserPage {
     private async hitTestPoint(
         handle: TargetHandle,
         point: Point,
+        scroll: Point,
         cache: Map<number, HitNodeCacheEntry>
     ): Promise<PointHit> {
         let hit: { backendNodeId?: number };
         try {
+            // Box models are in viewport coordinates, but getNodeForLocation reads document
+            // coordinates, so the point is shifted by the page scroll before it is tested.
             hit = await this.session.send<{ backendNodeId?: number }>('DOM.getNodeForLocation', {
-                x: point.x,
-                y: point.y,
+                x: point.x + scroll.x,
+                y: point.y + scroll.y,
                 includeUserAgentShadowDOM: false,
             });
         } catch (error) {
@@ -518,13 +551,22 @@ export class BrowserPage {
         ]);
 
         if (target.object?.objectId && topmost.object?.objectId) {
-            const contains = await this.session.send<{ result?: { value?: boolean } }>('Runtime.callFunctionOn', {
-                objectId: target.object.objectId,
-                functionDeclaration: 'function(other) { return this === other || this.contains(other); }',
-                arguments: [{ objectId: topmost.object.objectId }],
-                returnByValue: true,
-            });
-            if (contains.result?.value === true) {
+            let containsHit = false;
+            try {
+                const contains = await this.session.send<{ result?: { value?: boolean } }>('Runtime.callFunctionOn', {
+                    objectId: target.object.objectId,
+                    functionDeclaration: 'function(other) { return this === other || this.contains(other); }',
+                    arguments: [{ objectId: topmost.object.objectId }],
+                    returnByValue: true,
+                });
+                containsHit = contains.result?.value === true;
+            } catch {
+                // The two nodes live in different documents — a target inside a frame under an
+                // element of the page — and Chrome will not pass one to a function on the other.
+                // Nothing in another document can be inside the target, so the hit is a blocker.
+                containsHit = false;
+            }
+            if (containsHit) {
                 cache.set(hitId, { reachesTarget: true });
                 return { kind: 'reachable' };
             }
@@ -543,6 +585,11 @@ export class BrowserPage {
         this.lastClickFailure = undefined;
         this.clickFailureEpisode = undefined;
         this.clickFailureLoaderId = undefined;
+    }
+
+    /** Clears click recovery after a person is asked to change the page before an action is replayed. */
+    resetClickRecovery(): void {
+        this.clearClickFailures();
     }
 
     private observeRecoveryLoader(loaderId: string): void {
@@ -580,12 +627,13 @@ export class BrowserPage {
                 const failure = this.markClickFailure(handle);
                 throw clickLayoutUnavailableError(handle.describe, failure.repeated);
             }
+            const scroll = await this.pageScroll();
             let firstBlocker: string | undefined;
             let firstBlockerId: number | undefined;
             let sawNoNode = false;
 
             for (const point of points) {
-                const hit = await this.hitTestPoint(handle, point, cache);
+                const hit = await this.hitTestPoint(handle, point, scroll, cache);
                 if (hit.kind === 'reachable') {
                     return point;
                 }
@@ -642,8 +690,7 @@ export class BrowserPage {
      * real editing pipeline, so the `input` events a controlled component listens for actually
      * fire. Assigning the property directly leaves a framework's own state stale.
      */
-    private async typeInto(target: string, value: string): Promise<TargetHandle> {
-        const handle = await this.resolveTarget(target);
+    private async typeInto(handle: TargetHandle, value: string): Promise<TargetHandle> {
         await this.session.send('DOM.focus', { backendNodeId: handle.backendNodeId });
         await this.session.send('Input.dispatchKeyEvent', {
             type: 'keyDown',
@@ -738,14 +785,18 @@ export class BrowserPage {
             };
             await check(true);
             const baseline = await this.beginChange();
-            const focusedIdentity = await this.liveIdentity(handle.backendNodeId);
-            if (!focusedIdentity) throw clickLayoutUnavailableError(handle.describe);
-            this.state.assertIdentityUnchanged(handle.node.ref!, focusedIdentity);
-            await check(false);
-            await this.pressKey('Enter');
-            const { change, description } = await this.settleNow(baseline);
-            this.clearClickFailures();
-            return { summary: `Activated ${handle.describe} with Enter.`, change, changeDescription: description };
+            try {
+                const focusedIdentity = await this.liveIdentity(handle.backendNodeId);
+                if (!focusedIdentity) throw clickLayoutUnavailableError(handle.describe);
+                this.state.assertIdentityUnchanged(handle.node.ref!, focusedIdentity);
+                await check(false);
+                await this.pressKey('Enter');
+                const { change, description } = await this.settleNow(baseline);
+                this.clearClickFailures();
+                return { summary: `Activated ${handle.describe} with Enter.`, change, changeDescription: description };
+            } finally {
+                baseline.dispose();
+            }
         } finally {
             await this.session.send('Runtime.releaseObject', { objectId: object.objectId }).catch(() => {});
         }
@@ -760,33 +811,56 @@ export class BrowserPage {
                     return this.activateKeyboardControl(handle);
                 }
                 const point = await this.reachablePoint(handle);
-                const baseline = await this.beginChange();
-                await this.clickAt(point);
-                const { change, description } = await this.settleNow(baseline);
-                this.clearClickFailures();
-                return { summary: `Clicked ${handle.describe}.`, change, changeDescription: description };
+                const baseline = await this.beginChange(handle);
+                try {
+                    await this.clickAt(point);
+                    const { change, description } = await this.settleNow(baseline, false, handle);
+                    if (change.navigated || change.domMutated || change.focusChanged) {
+                        this.clearClickFailures();
+                    } else if (!change.frameUnobserved && this.markClickFailure(handle).repeated) {
+                        // Inside a frame, silence is not evidence: the frame's own DOM is not observed,
+                        // so a quiet click there is neither a success nor a failure to count.
+                        throw clickNoObservedChangeError(handle.describe);
+                    }
+                    return { summary: `Clicked ${handle.describe}.`, change, changeDescription: description };
+                } finally {
+                    baseline.dispose();
+                }
             }
             case 'hover': {
                 const handle = await this.resolveTarget(this.requireTarget(request));
                 const point = await this.centreOf(handle);
-                const baseline = await this.beginChange();
-                await this.session.send('Input.dispatchMouseEvent', {
-                    type: 'mouseMoved',
-                    x: Math.round(point.x),
-                    y: Math.round(point.y),
-                });
-                const { change, description } = await this.settleNow(baseline);
-                return { summary: `Hovered ${handle.describe}.`, change, changeDescription: description };
+                const baseline = await this.beginChange(handle);
+                try {
+                    await this.session.send('Input.dispatchMouseEvent', {
+                        type: 'mouseMoved',
+                        x: Math.round(point.x),
+                        y: Math.round(point.y),
+                    });
+                    const { change, description } = await this.settleNow(baseline, false, handle);
+                    return { summary: `Hovered ${handle.describe}.`, change, changeDescription: description };
+                } finally {
+                    baseline.dispose();
+                }
             }
             case 'type': {
                 if (request.value === undefined) {
                     throw new SteelToolError('The "type" action needs a value.', { code: 'invalid_argument' });
                 }
-                const baseline = await this.beginChange();
-                const handle = await this.typeInto(this.requireTarget(request), request.value);
-                const { change, description } = await this.settleNow(baseline, true);
-                this.clearClickFailures();
-                return { summary: this.describeTyped(handle, request.value), change, changeDescription: description };
+                const handle = await this.resolveTarget(this.requireTarget(request));
+                const baseline = await this.beginChange(handle);
+                try {
+                    await this.typeInto(handle, request.value);
+                    const { change, description } = await this.settleNow(baseline, true, handle);
+                    this.clearClickFailures();
+                    return {
+                        summary: this.describeTyped(handle, request.value),
+                        change,
+                        changeDescription: description,
+                    };
+                } finally {
+                    baseline.dispose();
+                }
             }
             case 'fill_form': {
                 if (!request.fields?.length) {
@@ -794,15 +868,25 @@ export class BrowserPage {
                         code: 'invalid_argument',
                     });
                 }
-                const baseline = await this.beginChange();
-                const summaries: string[] = [];
-                for (const field of request.fields) {
-                    const handle = await this.typeInto(field.target, field.value);
-                    summaries.push(this.describeTyped(handle, field.value));
+                // Every target is resolved before anything is typed, so a stale ref fails the whole
+                // form rather than half of it, and the frame to watch is known before the first key.
+                const handles: TargetHandle[] = [];
+                for (const field of request.fields) handles.push(await this.resolveTarget(field.target));
+                const framed = handles.find(handle => this.inChildFrame(handle));
+                const baseline = await this.beginChange(framed);
+                try {
+                    const summaries: string[] = [];
+                    for (const [at, field] of request.fields.entries()) {
+                        const handle = handles[at]!;
+                        await this.typeInto(handle, field.value);
+                        summaries.push(this.describeTyped(handle, field.value));
+                    }
+                    const { change, description } = await this.settleNow(baseline, true, framed);
+                    this.clearClickFailures();
+                    return { summary: summaries.join(' '), change, changeDescription: description };
+                } finally {
+                    baseline.dispose();
                 }
-                const { change, description } = await this.settleNow(baseline, true);
-                this.clearClickFailures();
-                return { summary: summaries.join(' '), change, changeDescription: description };
             }
             case 'select': {
                 if (request.value === undefined) {
@@ -814,33 +898,41 @@ export class BrowserPage {
                 const resolved = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
                     backendNodeId: handle.backendNodeId,
                 });
-                const baseline = await this.beginChange();
-                await this.session.send('Runtime.callFunctionOn', {
-                    objectId: resolved.object?.objectId,
-                    functionDeclaration:
-                        'function(value) { this.value = value; this.dispatchEvent(new Event("input", { bubbles: true })); this.dispatchEvent(new Event("change", { bubbles: true })); }',
-                    arguments: [{ value: request.value }],
-                });
-                const { change, description } = await this.settleNow(baseline);
-                this.clearClickFailures();
-                return {
-                    summary: `Selected "${request.value}" in ${handle.describe}.`,
-                    change,
-                    changeDescription: description,
-                };
+                const baseline = await this.beginChange(handle);
+                try {
+                    await this.session.send('Runtime.callFunctionOn', {
+                        objectId: resolved.object?.objectId,
+                        functionDeclaration:
+                            'function(value) { this.value = value; this.dispatchEvent(new Event("input", { bubbles: true })); this.dispatchEvent(new Event("change", { bubbles: true })); }',
+                        arguments: [{ value: request.value }],
+                    });
+                    const { change, description } = await this.settleNow(baseline, false, handle);
+                    this.clearClickFailures();
+                    return {
+                        summary: `Selected "${request.value}" in ${handle.describe}.`,
+                        change,
+                        changeDescription: description,
+                    };
+                } finally {
+                    baseline.dispose();
+                }
             }
             case 'scroll': {
                 const amount = Number.parseInt(request.value ?? '600', 10);
                 const baseline = await this.beginChange();
-                await this.session.send('Input.dispatchMouseEvent', {
-                    type: 'mouseWheel',
-                    x: 10,
-                    y: 10,
-                    deltaX: 0,
-                    deltaY: Number.isFinite(amount) ? amount : 600,
-                });
-                const { change, description } = await this.settleNow(baseline);
-                return { summary: `Scrolled by ${amount}px.`, change, changeDescription: description };
+                try {
+                    await this.session.send('Input.dispatchMouseEvent', {
+                        type: 'mouseWheel',
+                        x: 10,
+                        y: 10,
+                        deltaX: 0,
+                        deltaY: Number.isFinite(amount) ? amount : 600,
+                    });
+                    const { change, description } = await this.settleNow(baseline);
+                    return { summary: `Scrolled by ${amount}px.`, change, changeDescription: description };
+                } finally {
+                    baseline.dispose();
+                }
             }
             case 'press': {
                 if (!request.value) {
@@ -849,9 +941,13 @@ export class BrowserPage {
                     });
                 }
                 const baseline = await this.beginChange();
-                await this.pressKey(request.value);
-                const { change, description } = await this.settleNow(baseline);
-                return { summary: `Pressed ${request.value}.`, change, changeDescription: description };
+                try {
+                    await this.pressKey(request.value);
+                    const { change, description } = await this.settleNow(baseline);
+                    return { summary: `Pressed ${request.value}.`, change, changeDescription: description };
+                } finally {
+                    baseline.dispose();
+                }
             }
             case 'go_back': {
                 const history = await this.session.send<{
@@ -866,11 +962,15 @@ export class BrowserPage {
                 }
                 const beforeLoader = (await this.currentFrame()).loaderId;
                 const baseline = await this.beginChange();
-                await this.session.send('Page.navigateToHistoryEntry', { entryId: previous.id });
-                const { change, description } = await this.settleNow(baseline);
-                const afterLoader = (await this.currentFrame()).loaderId;
-                if (afterLoader && afterLoader !== beforeLoader) this.clearClickFailures();
-                return { summary: 'Went back one page.', change, changeDescription: description };
+                try {
+                    await this.session.send('Page.navigateToHistoryEntry', { entryId: previous.id });
+                    const { change, description } = await this.settleNow(baseline);
+                    const afterLoader = (await this.currentFrame()).loaderId;
+                    if (afterLoader && afterLoader !== beforeLoader) this.clearClickFailures();
+                    return { summary: 'Went back one page.', change, changeDescription: description };
+                } finally {
+                    baseline.dispose();
+                }
             }
             case 'dismiss_overlays':
                 return this.dismissOverlays();
@@ -885,46 +985,85 @@ export class BrowserPage {
         }
     }
 
+    /** Confirms a button belongs to a rendered consent dialog/banner before automatic dismissal. */
+    private async isConsentControl(node: SnapshotNode): Promise<boolean> {
+        if (node.role !== 'button') return false;
+        const { object } = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
+            backendNodeId: node.backendNodeId,
+        });
+        if (!object?.objectId) return false;
+        try {
+            const result = await this.session.send<{ result?: { value?: boolean } }>('Runtime.callFunctionOn', {
+                objectId: object.objectId,
+                functionDeclaration: `function() {
+                    for (let parent = this.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+                        const style = getComputedStyle(parent);
+                        const dialog = parent.matches('dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"]');
+                        const banner = /cookie|consent/i.test(parent.id + ' ' + parent.className) &&
+                            (style.position === 'fixed' || style.position === 'sticky');
+                        if ((dialog || banner) && /cookies?|consent/i.test((parent.innerText || '').slice(0, 10000))) return true;
+                    }
+                    return false;
+                }`,
+                returnByValue: true,
+            });
+            return result.result?.value === true;
+        } finally {
+            await this.session.send('Runtime.releaseObject', { objectId: object.objectId }).catch(() => undefined);
+        }
+    }
+
     /** Presses Escape and clicks a recognised consent control, if one is on the page. */
     private async dismissOverlays(): Promise<ActOutcome> {
         const baseline = await this.beginChange();
-        await this.pressKey('Escape');
-        const snapshot = await this.snapshot({});
-        const candidate = snapshot.nodes.find(
-            node => node.ref !== undefined && node.inViewport && OVERLAY_DISMISS_NAMES.test(node.name)
-        );
+        try {
+            await this.pressKey('Escape');
+            const snapshot = await this.snapshot({});
+            let candidate: SnapshotNode | undefined;
+            for (const node of snapshot.nodes) {
+                if (
+                    node.ref &&
+                    node.inViewport &&
+                    OVERLAY_DISMISS_NAMES.test(node.name) &&
+                    (await this.isConsentControl(node))
+                ) {
+                    candidate = node;
+                    break;
+                }
+            }
 
-        if (!candidate?.ref) {
+            if (!candidate?.ref) {
+                const { change, description } = await this.settleNow(baseline);
+                return {
+                    summary: 'Pressed Escape. Found no recognised cookie or consent overlay control to click.',
+                    change,
+                    changeDescription: description,
+                };
+            }
+
+            const handle = await this.resolveTarget(candidate.ref);
+            const point = await this.reachablePoint(handle);
+            await this.clickAt(point);
             const { change, description } = await this.settleNow(baseline);
+            this.clearClickFailures();
             return {
-                summary: 'Pressed Escape. Found no recognised cookie or consent overlay control to click.',
+                summary: `Pressed Escape and clicked "${candidate.name}".`,
                 change,
                 changeDescription: description,
             };
+        } finally {
+            baseline.dispose();
         }
-
-        const handle = await this.resolveTarget(candidate.ref);
-        const point = await this.centreOf(handle);
-        await this.clickAt(point);
-        const { change, description } = await this.settleNow(baseline);
-        this.clearClickFailures();
-        return {
-            summary: `Pressed Escape and clicked "${candidate.name}".`,
-            change,
-            changeDescription: description,
-        };
     }
 
     /** Polls until an explicit condition holds. There is deliberately no network-idle wait. */
     async waitFor(request: WaitRequest): Promise<WaitOutcome> {
-        const condition =
-            request.text !== undefined
-                ? `the text "${request.text}" to appear`
-                : request.selector !== undefined
-                  ? `an element matching "${request.selector}" to appear`
-                  : request.url !== undefined
-                    ? `the URL to contain "${request.url}"`
-                    : undefined;
+        const conditions = [
+            request.text === undefined ? undefined : `the text "${request.text}" to appear`,
+            request.selector === undefined ? undefined : `an element matching "${request.selector}" to appear`,
+            request.url === undefined ? undefined : `the URL to contain "${request.url}"`,
+        ].filter((condition): condition is string => condition !== undefined);
+        const condition = conditions.length ? conditions.join(' and ') : undefined;
 
         if (condition === undefined) {
             throw new SteelToolError(
@@ -953,7 +1092,7 @@ export class BrowserPage {
     private async conditionHolds(request: WaitRequest): Promise<boolean> {
         if (request.url !== undefined) {
             const frame = await this.currentFrame();
-            return frame.url.includes(request.url);
+            if (!frame.url.includes(request.url)) return false;
         }
         if (request.selector !== undefined) {
             const { root } = await this.session.send<{ root: { nodeId: number } }>('DOM.getDocument', { depth: 0 });
@@ -961,10 +1100,13 @@ export class BrowserPage {
                 nodeId: root.nodeId,
                 selector: request.selector,
             });
-            return Boolean(nodeId);
+            if (!nodeId) return false;
         }
-        const snapshot = await this.snapshot({});
-        const needle = (request.text ?? '').toLowerCase();
-        return snapshot.nodes.some(node => node.name.toLowerCase().includes(needle));
+        if (request.text !== undefined) {
+            const snapshot = await this.snapshot({});
+            const needle = request.text.toLowerCase();
+            if (!snapshot.nodes.some(node => node.name.toLowerCase().includes(needle))) return false;
+        }
+        return true;
     }
 }

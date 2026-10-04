@@ -315,6 +315,7 @@ export class HeadlessChrome {
         private readonly process: ChildProcess,
         private readonly connection: CdpConnection,
         private readonly profile: string,
+        /** The browser's own DevTools endpoint, for a test that wants a connection of its own. */
         readonly debuggerUrl: string
     ) {}
 

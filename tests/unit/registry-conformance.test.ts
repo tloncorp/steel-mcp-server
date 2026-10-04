@@ -68,6 +68,40 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
         vi.useRealTimers();
     });
 
+    describe('session capacity reservations', () => {
+        it('admits only one concurrent creation at a limit of one', async () => {
+            const admitted = await Promise.all(
+                Array.from({ length: 5 }, (_, i) =>
+                    registry.reserveSessionSlot(ORG_A, `pending-${i}`, Date.now() + 60000, 1)
+                )
+            );
+            expect(admitted.filter(Boolean)).toHaveLength(1);
+            await expect(registry.reserveSessionSlot(ORG_B, 'other', Date.now() + 60000, 1)).resolves.toBe(true);
+        });
+        it('retains capacity until release and counts pre-existing live records', async () => {
+            await registry.create({ principal: ORG_A, steelSessionId: 'existing', expiresAt: Date.now() + 60000 });
+            await expect(registry.reserveSessionSlot(ORG_A, 'pending', Date.now() + 60000, 1)).resolves.toBe(false);
+            await expect(registry.reserveSessionSlot(ORG_A, 'pending', Date.now() + 60000, 2)).resolves.toBe(true);
+            const record = await registry.create({
+                principal: ORG_A,
+                steelSessionId: 'pending',
+                expiresAt: Date.now() + 60000,
+            });
+            await expect(registry.reserveSessionSlot(ORG_A, 'next', Date.now() + 60000, 2)).resolves.toBe(false);
+            await registry.release(record.handle, ORG_A, 'explicit');
+            await expect(registry.reserveSessionSlot(ORG_A, 'next', Date.now() + 60000, 2)).resolves.toBe(true);
+        });
+        it('expires abandoned reservations and releases failed creations without freeing another slot', async () => {
+            await registry.reserveSessionSlot(ORG_A, 'abandoned', Date.now() + 100, 1);
+            await registry.releaseSessionSlot(ORG_A, 'not-the-owner');
+            await expect(registry.reserveSessionSlot(ORG_A, 'next', Date.now() + 60000, 1)).resolves.toBe(false);
+            advance(100);
+            await expect(registry.reserveSessionSlot(ORG_A, 'next', Date.now() + 60000, 1)).resolves.toBe(true);
+            await registry.releaseSessionSlot(ORG_A, 'next');
+            await expect(registry.reserveSessionSlot(ORG_A, 'retry', Date.now() + 60000, 1)).resolves.toBe(true);
+        });
+    });
+
     describe('create and resolve', () => {
         it('round-trips every field a tool reads back off the handle', async () => {
             // debugUrl is the live-player URL the human-in-the-loop handoff elicits with. A backend

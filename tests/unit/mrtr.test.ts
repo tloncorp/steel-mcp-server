@@ -127,9 +127,10 @@ describe('supportsInlineViewer', () => {
 });
 
 describe('supportsElicitation', () => {
-    it('is true for form elicitation (a bare object) as well as URL elicitation', () => {
+    it('accepts explicit or implied form support, but rejects URL-only support', () => {
         expect(supportsElicitation(context({ capabilities: { elicitation: {} } }))).toBe(true);
-        expect(supportsElicitation(context({ capabilities: { elicitation: { url: {} } } }))).toBe(true);
+        expect(supportsElicitation(context({ capabilities: { elicitation: { url: {} } } }))).toBe(false);
+        expect(supportsElicitation(context({ capabilities: { elicitation: { form: {} } } }))).toBe(true);
     });
 
     it('is false when no elicitation was declared, even if other capabilities were', () => {

@@ -496,10 +496,16 @@ export function navigationFailedError(url: string, errorText: string): SteelTool
 }
 
 /** Why a `@eN` reference no longer resolves. */
-export type StaleRefReason = 'page_navigated' | 'node_removed' | 'role_or_name_changed' | 'snapshot_superseded';
+export type StaleRefReason =
+    | 'page_navigated'
+    | 'frame_navigated'
+    | 'node_removed'
+    | 'role_or_name_changed'
+    | 'snapshot_superseded';
 
 const STALE_REASON_TEXT: Record<StaleRefReason, string> = {
     page_navigated: 'the page navigated to a new document',
+    frame_navigated: 'the frame holding it loaded a new document',
     node_removed: 'the node was removed from the DOM',
     role_or_name_changed: 'the element changed role or accessible name',
     snapshot_superseded: 'the snapshot it came from has been superseded',
@@ -584,6 +590,24 @@ export function clickLayoutUnavailableError(ref: string, repeated = false): Stee
         code: 'click_blocked',
         details: { ref, reason: 'no_layout_box', ...(repeated ? { handoff_required: true } : {}) },
     });
+}
+
+/** Builds the terminal error after Chrome dispatched the same click twice without observable progress. */
+export function clickNoObservedChangeError(ref: string): SteelToolError {
+    return new SteelToolError(
+        `Chrome dispatched a click on ${ref} twice, but nothing changed on either attempt: no page change or focus move. ` +
+            'Do not retry this control again; change strategy, try another candidate, or call ' +
+            'browser_session_handoff for manual control.',
+        {
+            code: 'click_blocked',
+            details: {
+                ref,
+                reason: 'no_observed_change',
+                handoff_required: true,
+                diagnostic: { pointer_dispatched: true },
+            },
+        }
+    );
 }
 
 /** Capabilities the self-hosted steel-browser image does not have. */
