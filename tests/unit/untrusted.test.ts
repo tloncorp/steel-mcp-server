@@ -64,7 +64,38 @@ describe('isSensitiveField / redactSensitiveValue', () => {
     });
 
     it('leaves ordinary text inputs alone', () => {
-        expect(isSensitiveField({ tagName: 'input', type: 'text', name: 'city' })).toBe(false);
+        expect(isSensitiveField({ tagName: 'input', type: 'text', name: 'search' })).toBe(false);
+    });
+
+    it.each([
+        'section-billing billing cc-number',
+        'shipping address-line1',
+        'street-address',
+        'country',
+        'name',
+        'email',
+        'username',
+        'tel',
+        'cc-exp',
+    ])('redacts standard personal autofill purpose %s', autocomplete => {
+        for (const tagName of ['input', 'textarea', 'select'])
+            expect(isSensitiveField({ tagName, autocomplete })).toBe(true);
+    });
+    it.each([
+        'Email or phone',
+        'Street address',
+        'Card number',
+        'Expiration date',
+        'First name',
+        'City',
+        'Postal code',
+    ])('redacts labeled fields without autocomplete: %s', label => {
+        expect(isSensitiveField({ tagName: 'input', type: 'text', label })).toBe(true);
+    });
+
+    it('treats unlabelled email, phone, and split-code controls as sensitive', () => {
+        for (const type of ['email', 'tel']) expect(isSensitiveField({ tagName: 'input', type })).toBe(true);
+        expect(isSensitiveField({ tagName: 'input', type: 'text', maxLength: '1' })).toBe(true);
     });
 
     it('replaces a value with a length-only placeholder', () => {

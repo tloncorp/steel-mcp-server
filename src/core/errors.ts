@@ -227,7 +227,7 @@ export interface PageBlockEvidence {
     /** The rendered accessibility text. Already invisible-stripped and password-redacted. */
     text?: string | undefined;
     /** True when the page holds a field the snapshot classified as sensitive, such as a password. */
-    hasPasswordField?: boolean | undefined;
+    hasSensitiveField?: boolean | undefined;
 }
 
 /** A block nobody but a person can clear: a challenge to solve, or a credential to enter. */
@@ -259,7 +259,8 @@ const CAPTCHA_WIDGET_MARKERS: ReadonlyArray<{ vendor: string; marker: string; te
 ];
 
 /** Words that confirm a page holding a password field is asking for one, not offering a reset. */
-const LOGIN_TEXT = /\b(log ?in|sign ?in|password|passphrase|authenticate)\b/i;
+const LOGIN_TEXT =
+    /\b(log ?in|sign ?in|password|passphrase|authenticate|verification code|one[ -]time (?:code|password))\b/i;
 
 /**
  * Recognises a page only a person can get past.
@@ -276,11 +277,10 @@ export function detectInteractiveBlock(evidence: PageBlockEvidence): Interactive
     const widget = CAPTCHA_WIDGET_MARKERS.find(candidate => candidate.test.test(haystack));
     if (widget) return { kind: 'captcha', vendor: widget.vendor, marker: widget.marker };
 
-    // The password field is required, not merely corroborating: nearly every page carries a "Sign
-    // in" link, and treating those as login walls would hand a human the browser on every hop. The
-    // cost is that a wall offering only "Continue with Google" has no field and is not recognised.
-    if (evidence.hasPasswordField && LOGIN_TEXT.test(haystack)) {
-        return { kind: 'login_wall', vendor: 'credentials', marker: 'password_field' };
+    // A rendered sensitive input corroborates login text. A Sign in link alone
+    // must not turn ordinary navigation into a handoff.
+    if (evidence.hasSensitiveField && LOGIN_TEXT.test(haystack)) {
+        return { kind: 'login_wall', vendor: 'credentials', marker: 'sensitive_field' };
     }
     return null;
 }
@@ -316,7 +316,7 @@ const CHALLENGE_CONTROL_NAME =
     /captcha|turnstile|challenge|not a robot|are you a robot|verify|human|press (and hold|&)/i;
 
 /** What the control that submits a credential form is called. */
-const LOGIN_SUBMIT_NAME = /log ?in|sign ?in|continue|next|submit|authenticate|unlock/i;
+const LOGIN_SUBMIT_NAME = /log ?in|sign ?in|continue|next|verify|submit|authenticate|unlock/i;
 
 /**
  * How much else a page may hold before a block on it is read as furniture rather than a wall.

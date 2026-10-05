@@ -59,7 +59,8 @@ export function runEvidence(snapshot: PageSnapshot): string {
 export function runCandidates(
     snapshot: PageSnapshot,
     inputs: RunInput[],
-    continueLogin = false
+    continueLogin = false,
+    filledDetails = false
 ): Map<string, Candidate> {
     const candidates = new Map<string, Candidate>();
     for (const node of snapshot.nodes) {
@@ -82,6 +83,7 @@ export function runCandidates(
                 label: `Click ${label}`,
                 action: { action: 'click', target: node.ref },
                 confirmation:
+                    (filledDetails && /^(?:continue|next|submit|save|confirm|pay|buy|place)\b/i.test(node.name)) ||
                     consequential.test(node.name) ||
                     (role === 'button' && !navigationButton.test(node.name) && !credentialSubmission),
                 ...(credentialSubmission ? { credentialSubmission: true } : {}),
@@ -183,7 +185,12 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                         }
                         await check();
                         const evidence = runEvidence(snapshot);
-                        const candidates = runCandidates(snapshot, args.inputs ?? [], continuation !== null);
+                        const candidates = runCandidates(
+                            snapshot,
+                            args.inputs ?? [],
+                            continuation?.kind === 'login',
+                            continuation?.kind === 'details'
+                        );
                         const criteria = Object.fromEntries(
                             [...candidates].map(([id, candidate]) => [id, candidate.label])
                         );
@@ -283,7 +290,7 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                             if (
                                 !liveReceipt ||
                                 !chosen.action?.target ||
-                                !(await page.isCredentialControl(chosen.action.target, liveReceipt.kind))
+                                !(await page.isCredentialControl(chosen.action.target, liveReceipt))
                             ) {
                                 status = 'needs_handoff';
                                 break;

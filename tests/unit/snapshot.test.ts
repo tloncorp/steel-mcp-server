@@ -673,15 +673,15 @@ describe('PageState.capture — untrusted content handling', () => {
                     tag: 'INPUT',
                     backendNodeId: 21,
                     role: 'textbox',
-                    name: 'City',
-                    attributes: { type: 'text', name: 'city' },
-                    inputValue: 'Zagreb',
+                    name: 'Query',
+                    attributes: { type: 'text', name: 'query' },
+                    inputValue: 'orchid',
                     bounds: [0, 0, 100, 20],
                 },
             ])
         );
         const snapshot = await new PageState().capture(session, {});
-        expect(snapshot.nodes.find(node => node.name === 'City')?.value).toBe('Zagreb');
+        expect(snapshot.nodes.find(node => node.name === 'Query')?.value).toBe('orchid');
     });
 
     it('strips invisible characters smuggled into an accessible name', async () => {

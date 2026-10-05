@@ -160,9 +160,18 @@ describe('detectInteractiveBlock', () => {
             finalUrl: 'https://app.test/login',
             title: 'Sign in',
             text: 'textbox Email\ntextbox Password\nbutton Sign in',
-            hasPasswordField: true,
+            hasSensitiveField: true,
         });
-        expect(block).toMatchObject({ kind: 'login_wall', marker: 'password_field' });
+        expect(block).toMatchObject({ kind: 'login_wall', marker: 'sensitive_field' });
+    });
+
+    it.each([
+        'Sign in\ntextbox Email or phone\nbutton Continue',
+        'Verification code\ntextbox One-time code\nbutton Verify',
+    ])('recognizes sequential login fields: %s', text => {
+        expect(
+            detectInteractiveBlock({ finalUrl: 'https://app.test/login', text, hasSensitiveField: true })
+        ).toMatchObject({ kind: 'login_wall' });
     });
 
     it('does not call every page with a Sign in link a login wall', () => {
@@ -203,7 +212,7 @@ function pageEvidence(options: { url?: string; title?: string; controls: Fixture
         finalUrl: options.url ?? 'https://shop.test/',
         title: options.title ?? '',
         text: controls.map(control => `${control.role} ${control.name}`).join('\n'),
-        hasPasswordField: controls.some(control => control.sensitive),
+        hasSensitiveField: controls.some(control => control.sensitive),
         controls,
     };
 }
@@ -393,7 +402,7 @@ describe('a text marker alone never hands a person the browser', () => {
                 { role: 'textbox', name: 'Password', sensitive: true, interactable: true },
             ],
         });
-        expect(detectInteractiveBlock(evidence)).toMatchObject({ kind: 'login_wall', marker: 'password_field' });
+        expect(detectInteractiveBlock(evidence)).toMatchObject({ kind: 'login_wall', marker: 'sensitive_field' });
         expect(handsOff(evidence)).toBe(false);
     });
 });
@@ -413,7 +422,7 @@ describe('interactiveBlockError', () => {
 
     it('tells a login wall apart and points at the identity options, never at typing a password', () => {
         const err = interactiveBlockError(
-            { kind: 'login_wall', vendor: 'credentials', marker: 'password_field' },
+            { kind: 'login_wall', vendor: 'credentials', marker: 'sensitive_field' },
             'https://app.test/login',
             {}
         );
@@ -426,7 +435,7 @@ describe('interactiveBlockError', () => {
 
     it('says a loaded profile is not signed in and will not receive new login cookies', () => {
         const err = interactiveBlockError(
-            { kind: 'login_wall', vendor: 'credentials', marker: 'password_field' },
+            { kind: 'login_wall', vendor: 'credentials', marker: 'sensitive_field' },
             'https://app.test/login',
             { profileId: 'p1' }
         );

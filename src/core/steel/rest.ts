@@ -321,12 +321,15 @@ export class SteelRestClient implements SteelApi {
         });
         const value = object(response?.continuation);
         if (!value) return null;
-        const { pageId, frameUrl, origin, kind, expiresAt, submissionAttempted } = value;
+        const { pageId, frameUrl, origin, kind, anchorBackendNodeId, expiresAt, submissionAttempted } = value;
         if (
             typeof pageId !== 'string' ||
             typeof frameUrl !== 'string' ||
             typeof origin !== 'string' ||
-            (kind !== 'password' && kind !== 'otp') ||
+            (kind !== 'login' && kind !== 'details') ||
+            typeof anchorBackendNodeId !== 'number' ||
+            !Number.isSafeInteger(anchorBackendNodeId) ||
+            anchorBackendNodeId < 1 ||
             typeof expiresAt !== 'number' ||
             !Number.isFinite(expiresAt) ||
             typeof submissionAttempted !== 'boolean'
@@ -335,7 +338,7 @@ export class SteelRestClient implements SteelApi {
                 code: 'steel_error',
             });
         }
-        return { pageId, frameUrl, origin, kind, expiresAt, submissionAttempted };
+        return { pageId, frameUrl, origin, kind, anchorBackendNodeId, expiresAt, submissionAttempted };
     }
 
     async getSession(sessionId: string, signal?: AbortSignal): Promise<SteelSession> {

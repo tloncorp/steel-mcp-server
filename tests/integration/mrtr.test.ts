@@ -466,7 +466,8 @@ describe('the retry after a person has finished', () => {
                     pageId: 'target',
                     frameUrl: 'https://app.test/private',
                     origin: 'https://app.test',
-                    kind: 'password',
+                    kind: 'login',
+                    anchorBackendNodeId: 42,
                     expiresAt: deps.now().getTime() + 60_000,
                     submissionAttempted: false,
                 });
