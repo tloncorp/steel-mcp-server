@@ -592,8 +592,8 @@ describe('BrowserPage.act — text entry', () => {
                         tag: 'INPUT',
                         backendNodeId: 23,
                         role: 'textbox',
-                        name: 'City',
-                        attributes: { type: 'text', name: 'city' },
+                        name: 'Query',
+                        attributes: { type: 'text', name: 'query' },
                         bounds: [0, 0, 200, 30],
                     },
                 ])
@@ -601,8 +601,8 @@ describe('BrowserPage.act — text entry', () => {
         );
         const browserPage = await openPage(fixture);
         await browserPage.snapshot({});
-        const outcome = await browserPage.act({ action: 'type', target: '@e1', value: 'Zagreb' });
-        expect(outcome.summary).toContain('Zagreb');
+        const outcome = await browserPage.act({ action: 'type', target: '@e1', value: 'orchid' });
+        expect(outcome.summary).toContain('orchid');
     });
 
     it('redacts a typed value when the target came from a selector, where sensitivity is unknown', async () => {
@@ -627,8 +627,8 @@ describe('BrowserPage.act — text entry', () => {
                         tag: 'INPUT',
                         backendNodeId: 24,
                         role: 'textbox',
-                        name: 'City',
-                        attributes: { type: 'text', name: 'city' },
+                        name: 'Query',
+                        attributes: { type: 'text', name: 'query' },
                         bounds: [0, 0, 200, 30],
                     },
                 ])
@@ -640,8 +640,8 @@ describe('BrowserPage.act — text entry', () => {
         const browserPage = await openPage(fixture);
         await browserPage.snapshot({});
 
-        const outcome = await browserPage.act({ action: 'type', target: '#city', value: 'Zagreb' });
-        expect(outcome.summary).toContain('Zagreb');
+        const outcome = await browserPage.act({ action: 'type', target: '#query', value: 'orchid' });
+        expect(outcome.summary).toContain('orchid');
     });
 
     it('fills several fields in one call and settles once', async () => {
@@ -900,7 +900,8 @@ describe('BrowserPage.act — inside a frame', () => {
         const ref = await refOf(browserPage, 'Address');
 
         const outcome = await browserPage.act({ action: 'type', target: ref, value: '1 High Street' });
-        expect(outcome.summary).toContain('1 High Street');
+        expect(outcome.summary).not.toContain('1 High Street');
+        expect(outcome.summary).toContain('13 characters');
         expect(outcome.changeDescription).toMatch(/frame/i);
         expect(outcome.changeDescription).not.toMatch(/wrong element/i);
     });

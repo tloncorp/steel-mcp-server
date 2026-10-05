@@ -228,7 +228,7 @@ async function pageEvidence(page: BrowserPage): Promise<HandoffBlockEvidence> {
         finalUrl: snapshot.url,
         title: snapshot.title,
         text: snapshot.nodes.map(node => `${node.role} ${node.name}`).join('\n'),
-        hasPasswordField: snapshot.nodes.some(node => node.sensitive),
+        hasSensitiveField: snapshot.nodes.some(node => node.sensitive),
         controls: snapshot.nodes.map(node => ({
             role: node.role,
             name: node.name,

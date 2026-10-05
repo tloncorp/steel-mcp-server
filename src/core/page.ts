@@ -283,36 +283,59 @@ export class BrowserPage {
         return { url: frame.url, title: typeof evaluated.result?.value === 'string' ? evaluated.result.value : '' };
     }
 
-    /** A trusted fill receipt applies to one page and document URL, never a new tab or origin. */
+    /** Match the browser-owned receipt to its exact live node without reading its value. */
     async matchesCredentialContinuation(receipt: CredentialContinuation): Promise<boolean> {
-        const frame = await this.currentFrame();
-        if (frame.url !== receipt.frameUrl || new URL(frame.url).origin !== receipt.origin) return false;
         const target = await this.session.send<{ targetInfo?: { targetId?: string } }>('Target.getTargetInfo');
-        return target.targetInfo?.targetId === receipt.pageId;
-    }
-
-    /** Check form association and destination without reading a credential value into Node. */
-    async isCredentialControl(target: string, kind: 'password' | 'otp'): Promise<boolean> {
-        const handle = await this.resolveTarget(target);
-        const resolved = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
-            backendNodeId: handle.backendNodeId,
-        });
-        const objectId = resolved.object?.objectId;
-        if (!objectId) return false;
+        if (target.targetInfo?.targetId !== receipt.pageId) return false;
+        let objectId: string | undefined;
         try {
+            const resolved = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
+                backendNodeId: receipt.anchorBackendNodeId,
+            });
+            objectId = resolved.object?.objectId;
+            if (!objectId) return false;
             const result = await this.session.send<{ result?: { value?: boolean } }>('Runtime.callFunctionOn', {
                 objectId,
-                functionDeclaration: `function(kind) {
+                functionDeclaration: `function(receipt) {
+                    return this.isConnected && this.ownerDocument.location.href === receipt.frameUrl &&
+                        this.ownerDocument.location.origin === receipt.origin && typeof this.value === 'string' && this.value.length > 0;
+                }`,
+                arguments: [{ value: receipt }],
+                returnByValue: true,
+            });
+            return result.result?.value === true;
+        } catch {
+            return false;
+        } finally {
+            if (objectId) await this.session.send('Runtime.releaseObject', { objectId }).catch(() => {});
+        }
+    }
+
+    /** A filled address or card grants no permission to submit a login or transaction. */
+    async isCredentialControl(target: string, receipt: CredentialContinuation): Promise<boolean> {
+        if (receipt.kind !== 'login') return false;
+        const handle = await this.resolveTarget(target);
+        const objects: string[] = [];
+        try {
+            const resolved = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
+                backendNodeId: handle.backendNodeId,
+            });
+            const objectId = resolved.object?.objectId;
+            if (!objectId) return false;
+            objects.push(objectId);
+            const filled = await this.session.send<{ object?: { objectId?: string } }>('DOM.resolveNode', {
+                backendNodeId: receipt.anchorBackendNodeId,
+            });
+            const anchorId = filled.object?.objectId;
+            if (!anchorId) return false;
+            objects.push(anchorId);
+            const result = await this.session.send<{ result?: { value?: boolean } }>('Runtime.callFunctionOn', {
+                objectId,
+                functionDeclaration: `function(anchor, receipt) {
                     const doc = this.ownerDocument;
-                    const controls = Array.from(doc.querySelectorAll('input')).filter(input => {
-                        const rect = input.getBoundingClientRect();
-                        return rect.width > 0 && rect.height > 0 && !input.disabled &&
-                            (kind === 'password' ? input.type === 'password' :
-                                /one-time-code|otp|verification|security.?code|passcode/i.test(
-                                    input.autocomplete + ' ' + input.name + ' ' + input.id + ' ' + input.getAttribute('aria-label')));
-                    });
-                    const anchor = controls.find(input => input.value.length > 0);
-                    if (!anchor || !this.isConnected || !this.matches('button, input[type="submit"], [role="button"]')) return false;
+                    if (!anchor.isConnected || anchor.ownerDocument !== doc || doc.location.href !== receipt.frameUrl ||
+                        doc.location.origin !== receipt.origin || !anchor.value || !this.isConnected ||
+                        !this.matches('button, input[type="submit"], [role="button"]') || this.matches(':disabled, [aria-disabled="true"]')) return false;
                     if (anchor.form) {
                         if (this.form !== anchor.form && !anchor.form.contains(this)) return false;
                         const action = this.getAttribute('formaction') || anchor.form.getAttribute('action') || doc.location.href;
@@ -323,12 +346,16 @@ export class BrowserPage {
                     }
                     return false;
                 }`,
-                arguments: [{ value: kind }],
+                arguments: [{ objectId: anchorId }, { value: receipt }],
                 returnByValue: true,
             });
             return result.result?.value === true;
+        } catch {
+            return false;
         } finally {
-            await this.session.send('Runtime.releaseObject', { objectId }).catch(() => {});
+            await Promise.all(
+                objects.map(objectId => this.session.send('Runtime.releaseObject', { objectId }).catch(() => {}))
+            );
         }
     }
 
@@ -384,6 +411,17 @@ export class BrowserPage {
      * model's context window: an exact-pixel PNG costs several times more for no decision value.
      */
     async captureScreenshot(options: { fullPage: boolean }): Promise<{ data: string }> {
+        const snapshot = await this.snapshot({ interactiveOnly: false });
+        if (
+            snapshot.truncated ||
+            snapshot.unreadableFrames > 0 ||
+            snapshot.nodes.some(node => node.sensitive && node.value !== undefined && node.value !== '[redacted:empty]')
+        ) {
+            throw new SteelToolError(
+                'A raw screenshot cannot safely expose this form. Use browser_snapshot for a redacted view, or let the person continue in the live browser.',
+                { code: 'forbidden' }
+            );
+        }
         const result = await this.session.send<{ data: string }>('Page.captureScreenshot', {
             format: 'jpeg',
             quality: 60,

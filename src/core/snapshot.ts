@@ -121,6 +121,7 @@ interface AxNode {
 
 interface DomFacts {
     tagName: string;
+    parentBackendNodeId?: number | undefined;
     attributes: Record<string, string>;
     inputValue: string | undefined;
     bounds: [number, number, number, number] | undefined;
@@ -215,6 +216,7 @@ interface RawSnapshot {
         scrollOffsetY?: number;
         nodes?: {
             nodeName?: number[];
+            parentIndex?: number[];
             backendNodeId?: number[];
             attributes?: number[][];
             inputValue?: { index?: number[]; value?: number[] };
@@ -270,6 +272,7 @@ function readDomDocuments(payload: unknown): DomDocument[] {
             const bounds = layout?.bounds;
             facts.set(backendNodeId, {
                 tagName: text(nodes.nodeName?.[nodeIndex]),
+                parentBackendNodeId: backendIds[nodes.parentIndex?.[nodeIndex] ?? -1],
                 attributes,
                 inputValue: inputValues.get(nodeIndex),
                 bounds:
@@ -513,7 +516,9 @@ function synthesizeName(facts: DomFacts | undefined): string {
         facts.attributes.title,
         facts.attributes.alt,
         facts.attributes.placeholder,
-        facts.attributes.value,
+        facts.tagName === 'INPUT' && ['submit', 'button', 'reset'].includes(facts.attributes.type ?? '')
+            ? facts.attributes.value
+            : undefined,
         facts.attributes.name,
     ];
     return candidates.find(candidate => candidate && candidate.trim().length > 0)?.trim() ?? '';
@@ -658,6 +663,42 @@ export class PageState {
         this.frameLoaders = frameLoaders;
 
         const documents = readDomDocuments(domSnapshot);
+        // A username beside a password can have no name/autocomplete at all.
+        // Protect text controls in the same form, including form= associations.
+        const credentialNeighbours = new Set<number>();
+        for (const document of documents) {
+            const formsById = new Map(
+                [...document.facts]
+                    .filter(([, facts]) => facts.tagName === 'FORM' && facts.attributes.id)
+                    .map(([id, facts]) => [facts.attributes.id, id])
+            );
+            const formOf = (id: number): number | undefined => {
+                const field = document.facts.get(id);
+                if (field?.attributes.form) return formsById.get(field.attributes.form);
+                let current = field?.parentBackendNodeId;
+                for (let depth = 0; current !== undefined && depth < 200; depth++) {
+                    const parent = document.facts.get(current);
+                    if (parent?.tagName === 'FORM') return current;
+                    current = parent?.parentBackendNodeId;
+                }
+                return undefined;
+            };
+            const passwordForms = new Set(
+                [...document.facts]
+                    .filter(
+                        ([, facts]) => facts.tagName === 'INPUT' && facts.attributes.type?.toLowerCase() === 'password'
+                    )
+                    .map(([id]) => formOf(id))
+            );
+            for (const [id, facts] of document.facts) {
+                if (
+                    facts.tagName === 'INPUT' &&
+                    ['', 'text', 'email', 'tel'].includes(facts.attributes.type?.toLowerCase() ?? '') &&
+                    passwordForms.has(formOf(id))
+                )
+                    credentialNeighbours.add(id);
+            }
+        }
         const placements = resolveFramePlacements(documents);
         const facts = mergeDomFacts(documents, placements);
         const frameByOwner = new Map<number, string>();
@@ -803,12 +844,15 @@ export class PageState {
             const sensitive =
                 nodeFacts === undefined
                     ? rawValue !== undefined
-                    : isSensitiveField({
+                    : credentialNeighbours.has(backendNodeId ?? -1) ||
+                      isSensitiveField({
                           tagName: nodeFacts.tagName,
                           type: nodeFacts.attributes.type,
                           name: nodeFacts.attributes.name,
                           id: nodeFacts.attributes.id,
                           autocomplete: nodeFacts.attributes.autocomplete,
+                          label: name,
+                          maxLength: nodeFacts.attributes.maxlength,
                       });
 
             const value =
@@ -859,6 +903,10 @@ export class PageState {
                 });
             }
 
+            // Chrome exposes text-input contents again as StaticText descendants.
+            // Redacting only the parent's value leaves the same secret in the tree.
+            // Select descendants also reveal the private selection state.
+            if (sensitive) return;
             const childDepth = keep ? depth + 1 : depth;
             for (const child of children) visit(child, frameId, childDepth, name || parentName);
 

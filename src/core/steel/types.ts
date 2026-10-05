@@ -255,7 +255,8 @@ export interface CredentialContinuation {
     pageId: string;
     frameUrl: string;
     origin: string;
-    kind: 'password' | 'otp';
+    kind: 'login' | 'details';
+    anchorBackendNodeId: number;
     expiresAt: number;
     submissionAttempted: boolean;
 }
