@@ -5,6 +5,7 @@ import type { ServerDeps, ToolHost } from './context.js';
 import { registerBatch } from './tools/batch.js';
 import { registerAct, registerFind, registerNavigate, registerSnapshot, registerWaitFor } from './tools/browse.js';
 import { registerSessionHandoff } from './tools/handoff.js';
+import { registerLogin } from './tools/login.js';
 import { registerSessionReplay } from './tools/replay.js';
 import { registerRun } from './tools/run.js';
 import {
@@ -38,6 +39,7 @@ export const TOOL_TABLE: ToolDefinition[] = [
     { name: 'browser_pdf', profiles: SCRAPE_AND_UP, register: registerPdf },
     { name: 'browser_session_create', profiles: BROWSE_AND_UP, register: registerSessionCreate },
     { name: 'browser_session_release', profiles: BROWSE_AND_UP, register: registerSessionRelease },
+    { name: 'browser_login', profiles: BROWSE_AND_UP, register: registerLogin },
     { name: 'browser_navigate', profiles: BROWSE_AND_UP, register: registerNavigate },
     { name: 'browser_snapshot', profiles: BROWSE_AND_UP, register: registerSnapshot },
     { name: 'browser_find', profiles: BROWSE_AND_UP, register: registerFind },

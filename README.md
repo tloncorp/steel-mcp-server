@@ -111,6 +111,7 @@ three, which never start a browser.
 | `browser_pdf` | Render a page to PDF and return a link; supports proxies |
 | `browser_session_create` | Start a browser session you can interact with |
 | `browser_session_release` | Shut it down and stop the meter |
+| `browser_login` | Fill a saved login for this bot on the exact HTTPS origin without returning credentials |
 | `browser_navigate` | Point a session at a URL |
 | `browser_snapshot` | Read the page as an accessibility tree with `@eN` references |
 | `browser_find` | Locate elements by text, safe regex, or role without reading the whole page |
@@ -265,3 +266,24 @@ against Steel's API and Chrome, and [RESEARCH.md](RESEARCH.md) the decisions beh
 Contributions are welcome: fork, branch, and open a pull request that says what it changes and why.
 For bugs, [open an issue](https://github.com/steel-dev/steel-mcp-server/issues) with the tool you
 called and the error text.
+
+### Planet-backed login vault
+
+Self-hosted operators enable private saved-login filling with `BROWSER_VAULT_ENABLED=true`.
+Configuration requires `BROWSER_VAULT_KEY` (base64, 32 random bytes), `BROWSER_VAULT_KEY_ID`,
+`BROWSER_VAULT_SERVICE_TOKEN` (at least 32 characters), and `BROWSER_VAULT_PIONEER_ORIGIN`
+(an HTTPS origin template containing `{planet}`). The encryption key is durable deployment
+state: back it up and keep it consistent across browser clusters in the same environment.
+Changing it requires an explicit re-encryption migration; moon-code and owner-token rotation do not.
+
+The caller supplies `X-Tlon-Parent-Ship` and `X-Tlon-Ship` as routing hints. Pioneer verifies the
+moon's derived browser key before the session can use the vault. Ciphertext lives on the parent
+planet, partitioned by bot moon and exact HTTPS origin. Native owner authorization is required
+for saving, account selection, listing, and deletion. The model-facing `browser_login` tool
+returns status only and fills through the private browser API. It makes at most one automatic
+attempt per account revision and form step; a filled result is not proof of sign-in.
+
+The viewer connects to the service-token-protected `/internal/vault/` endpoints. Keep this
+surface and the browser REST API private. Both services are disabled by default, and configuration
+errors fail startup when enabled. See the sibling Steel Browser Kubernetes deployment guide for
+the matching viewer/Pioneer environment, rollout checks, and secret references.

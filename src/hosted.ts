@@ -7,10 +7,12 @@ import { createHostedArtifactService } from './core/artifacts.js';
 import { loadConfig } from './core/config.js';
 import { REAPER_INTERVAL_MS, resolveRegistryIdleMs } from './core/lifecycle.js';
 import { recordSessionReleased, resolveTracer } from './core/telemetry.js';
+import { loadVault } from './core/vault/config.js';
 import { SERVER_VERSION } from './core/version.js';
 import { createHandleRegistryBackend, HostedRuntime, type HostedRuntimeOptions } from './hosted-runtime.js';
 import { createSteelHttpHandler } from './http.js';
 import { startTracing } from './tracing.js';
+import { createVaultHttp } from './vault-http.js';
 
 const DEFAULT_PORT = 8080;
 /** Every interface, because a container's port is only reachable from outside if it binds one. */
@@ -87,6 +89,9 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
     // Built once with a placeholder so a broken profile, timeout or base URL fails here rather than
     // on some caller's first request. The credential is replaced per request and never reused.
     const template = loadConfig({ ...env, STEEL_API_KEY: 'startup-check' });
+    const vaultConfig = loadVault(env, template.baseUrl);
+    if (vaultConfig && template.deployment !== 'self_hosted')
+        throw new Error('The planet-backed vault requires a self-hosted browser.');
     for (const warning of template.warnings) log('info', warning);
 
     // Started before the runtime so the tracer the core resolves is already the real one.
@@ -99,6 +104,7 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
     });
 
     const runtime = new HostedRuntime({
+        createVault: vaultConfig?.create,
         configForCredential: credential => ({
             ...template,
             apiKey: template.deployment === 'cloud' ? credential : undefined,
@@ -130,8 +136,18 @@ export async function startHostedServer(options: HostedServerOptions): Promise<H
     const mcp = toNodeHandler(handler, {
         onerror: error => log('error', 'request failed before the MCP handler answered', { error: error.message }),
     });
+    const vaultHttp =
+        runtime.vault && vaultConfig ? createVaultHttp(runtime.vault, vaultConfig.serviceToken) : undefined;
 
     const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
+        if ((request.url ?? '').startsWith('/internal/vault/')) {
+            if (vaultHttp) void vaultHttp(request, response);
+            else {
+                response.writeHead(404);
+                response.end();
+            }
+            return;
+        }
         // Ahead of the MCP handler on purpose: a liveness probe arrives with the load balancer's own
         // Host header, which is not a name this endpoint is served under.
         if (request.method === 'GET' && (request.url ?? '').split('?')[0] === HEALTH_PATH) {

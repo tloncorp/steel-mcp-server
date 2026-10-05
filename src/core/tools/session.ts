@@ -324,6 +324,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                                 persistProfile: persistProfile || undefined,
                             },
                         });
+                        await deps.vault?.bindSession(record, ctx.mcpReq.signal);
                     } catch (error) {
                         await deps.pool.close(steelSessionId).catch(() => undefined);
                         await deps.api

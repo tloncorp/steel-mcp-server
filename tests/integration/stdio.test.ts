@@ -38,7 +38,7 @@ describe('the stdio binary', () => {
     it('serves tools/list over a real stdio connection', async () => {
         const { tools } = await client.listTools();
         expect(tools.map(tool => tool.name)).toContain('browser_scrape');
-        expect(tools).toHaveLength(16);
+        expect(tools).toHaveLength(17);
     });
 
     it('advertises the server instructions', () => {
