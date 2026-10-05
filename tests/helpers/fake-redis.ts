@@ -24,7 +24,7 @@ export class FakeRedis implements RedisCommands {
         return (this.options.now ?? (() => new Date()))().getTime();
     }
 
-    async get(key: string): Promise<string | null> {
+    private read(key: string): string | null {
         const entry = this.values.get(key);
         if (!entry) return null;
         if (entry.expiresAtMs <= this.nowMs()) {
@@ -34,25 +34,29 @@ export class FakeRedis implements RedisCommands {
         return entry.value;
     }
 
+    async get(key: string): Promise<string | null> {
+        return this.read(key);
+    }
+
     async set(key: string, value: string, ttlMs: number): Promise<void> {
         this.values.set(key, { value, expiresAtMs: this.nowMs() + ttlMs });
     }
 
     async setIfAbsent(key: string, value: string, ttlMs: number): Promise<boolean> {
-        if ((await this.get(key)) !== null) return false;
-        await this.set(key, value, ttlMs);
+        if (this.read(key) !== null) return false;
+        this.values.set(key, { value, expiresAtMs: this.nowMs() + ttlMs });
         return true;
     }
 
     async compareSet(key: string, expected: string, value: string, ttlMs: number): Promise<boolean> {
-        if ((await this.get(key)) !== expected) return false;
-        await this.set(key, value, ttlMs);
+        if (this.read(key) !== expected) return false;
+        this.values.set(key, { value, expiresAtMs: this.nowMs() + ttlMs });
         return true;
     }
 
     async compareDelete(key: string, expected: string): Promise<boolean> {
-        if ((await this.get(key)) !== expected) return false;
-        return (await this.del(key)) > 0;
+        if (this.read(key) !== expected) return false;
+        return this.values.delete(key);
     }
 
     async del(key: string): Promise<number> {

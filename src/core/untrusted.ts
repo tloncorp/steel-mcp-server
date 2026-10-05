@@ -37,10 +37,14 @@ export interface SensitiveFieldDescriptor {
     name?: string | undefined;
     id?: string | undefined;
     autocomplete?: string | undefined;
+    label?: string | undefined;
+    maxLength?: string | undefined;
 }
 
-const SENSITIVE_NAME_HINT = /pass(word|phrase)?|secret|otp|totp|mfa|2fa|cvv|cvc|ssn|token|api[-_]?key/i;
-const SENSITIVE_AUTOCOMPLETE_HINT = /^(current-password|new-password|one-time-code|cc-number|cc-csc)$/i;
+const SENSITIVE_NAME_HINT =
+    /pass(word|phrase)?|secret|otp|totp|mfa|2fa|cvv|cvc|csc|ssn|token|api[-_]?key|user\s*name|\blogin\b|\baccount\b|e-?mail|phone|mobile|card|expir(?:y|ation)|address|postal|postcode|\bzip\b|\bcity\b|\bstate\b|province|country|first\s*name|last\s*name|given\s*name|family\s*name|full\s*name|surname|^name$|^company$|^organization$|verification\s*code|one[\s-]*time/i;
+const SENSITIVE_AUTOCOMPLETE_HINT =
+    /^(?:username|current-password|new-password|one-time-code|cc-[a-z-]+|name|given-name|additional-name|family-name|organization|street-address|address-(?:line[123]|level[1234])|postal-code|country(?:-name)?|email|tel(?:-[a-z-]+)?)$/i;
 
 /** Provenance recorded on every fenced payload so the model can see where the text came from. */
 export interface Provenance {
@@ -73,10 +77,18 @@ export function stripHtmlComments(html: string): string {
 
 /** True when a form control's value must be redacted rather than serialised into a snapshot. */
 export function isSensitiveField(field: SensitiveFieldDescriptor): boolean {
-    if (field.tagName.toLowerCase() !== 'input') return false;
-    if ((field.type ?? '').toLowerCase() === 'password') return true;
-    if (SENSITIVE_AUTOCOMPLETE_HINT.test(field.autocomplete ?? '')) return true;
-    return SENSITIVE_NAME_HINT.test(field.name ?? '') || SENSITIVE_NAME_HINT.test(field.id ?? '');
+    if (!['input', 'select', 'textarea'].includes(field.tagName.toLowerCase())) return false;
+    if (['password', 'email', 'tel'].includes((field.type ?? '').toLowerCase())) return true;
+    if (field.tagName.toLowerCase() === 'input' && field.maxLength === '1') return true;
+    if ((field.autocomplete ?? '').split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE_HINT.test(token))) return true;
+    return [field.name, field.id, field.label].some(value =>
+        SENSITIVE_NAME_HINT.test(
+            (value ?? '')
+                .replace(/([a-z])([A-Z])/g, '$1 $2')
+                .replace(/[_-]/g, ' ')
+                .trim()
+        )
+    );
 }
 
 /** Replaces a secret with a placeholder that keeps the only useful signal: whether it is filled. */

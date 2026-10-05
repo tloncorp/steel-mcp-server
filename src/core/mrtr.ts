@@ -168,15 +168,16 @@ export function supportsUrlElicitation(
 }
 
 /**
- * Whether this request may be answered with an elicitation of any kind (form or URL).
+ * Whether this request may be answered with a form elicitation.
  *
- * Broader than `supportsUrlElicitation`: a bare `elicitation: {}` means form mode, which is all the
- * inline-viewer handoff needs. Read off the modern-wire per-request envelope only, since the inline
+ * A bare `elicitation: {}` means form mode; an explicit URL-only declaration does not. The
+ * inline-viewer handoff requires form mode. Read off the modern-wire per-request envelope only, since the inline
  * path it gates is itself modern-wire-only.
  */
 export function supportsElicitation(ctx: ServerContext): boolean {
     const envelope = ctx.mcpReq.envelope as Record<string, ClientCapabilities | undefined> | undefined;
-    return envelope?.[CLIENT_CAPABILITIES_META_KEY]?.elicitation !== undefined;
+    const elicitation = envelope?.[CLIENT_CAPABILITIES_META_KEY]?.elicitation;
+    return elicitation !== undefined && (elicitation.form !== undefined || elicitation.url === undefined);
 }
 
 /**
@@ -227,7 +228,7 @@ async function pageEvidence(page: BrowserPage): Promise<HandoffBlockEvidence> {
         finalUrl: snapshot.url,
         title: snapshot.title,
         text: snapshot.nodes.map(node => `${node.role} ${node.name}`).join('\n'),
-        hasPasswordField: snapshot.nodes.some(node => node.sensitive),
+        hasSensitiveField: snapshot.nodes.some(node => node.sensitive),
         controls: snapshot.nodes.map(node => ({
             role: node.role,
             name: node.name,

@@ -466,7 +466,8 @@ describe('the retry after a person has finished', () => {
                     pageId: 'target',
                     frameUrl: 'https://app.test/private',
                     origin: 'https://app.test',
-                    kind: 'password',
+                    kind: 'login',
+                    anchorBackendNodeId: 42,
                     expiresAt: deps.now().getTime() + 60_000,
                     submissionAttempted: false,
                 });
@@ -538,6 +539,32 @@ function cartPage(withChallenge: boolean): FixturePage {
 }
 
 describe('the tools that can hit a wall', () => {
+    it('hands off after two no-op clicks without replaying either click after hand-back', async () => {
+        const harness = await connectModern({ deps: testDeps({ page: plainPage }) });
+        const handle = await newSession(harness);
+        const steelSessionId = harness.deps.api.created[0]!.sessionId;
+        await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
+        const fixture = harness.deps.pool.fixtureFor(steelSessionId)!;
+
+        const first = await harness.client.callTool({
+            name: 'browser_act',
+            arguments: { session_id: handle, action: 'click', target: '@e1' },
+        });
+        expect(first.isError).toBeFalsy();
+        expect(textOf(first)).toMatch(/nothing changed/i);
+
+        const handedBack = await harness.client.callTool({
+            name: 'browser_act',
+            arguments: { session_id: handle, action: 'click', target: '@e1' },
+        });
+
+        expect(handedBack.isError).toBeFalsy();
+        expect(textOf(handedBack)).toMatch(/handed the browser back/i);
+        expect(harness.elicited).toHaveLength(1);
+        expect(harness.deps.api.created).toHaveLength(1);
+        expect(fixture.sent.filter(call => call.method === 'Input.dispatchMouseEvent')).toHaveLength(4);
+    });
+
     it('hands off a repeatedly unstable click on the same session without replaying it after hand-back', async () => {
         const harness = await connectModern({ deps: testDeps({ page: plainPage }) });
         const handle = await newSession(harness);
@@ -1107,4 +1134,31 @@ describe('the 2025 wire era', () => {
 
         expect(result.content).toEqual(expectedLoginError().content);
     });
+});
+
+describe('URL-only Apps handoff fallback', () => {
+    it.each(['browser_session_handoff', 'browser_navigate'])(
+        'uses URL elicitation for %s when form support is absent',
+        async name => {
+            const harness = await connectModern({
+                deps: testDeps({ page: name === 'browser_navigate' ? loginWallPage : plainPage }),
+                capabilities: { extensions: { [UI_EXTENSION_NAME]: {} }, elicitation: { url: {} } },
+                autoFulfill: false,
+            });
+            const handle = await newSession(harness);
+            const result = await harness.client.callTool(
+                {
+                    name,
+                    arguments: {
+                        session_id: handle,
+                        ...(name === 'browser_navigate' ? { url: 'https://app.test/login' } : { reason: 'review' }),
+                    },
+                },
+                { allowInputRequired: true }
+            );
+            const input = result as unknown as { inputRequests?: Record<string, { params: UrlElicitation }> };
+            expect(input.inputRequests?.[HANDOFF_KEY]?.params.mode).toBe('url');
+            expect(input.inputRequests?.[HANDOFF_KEY]?.params.url).toContain('/player');
+        }
+    );
 });

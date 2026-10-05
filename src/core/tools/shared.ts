@@ -10,7 +10,7 @@ import { DEFAULT_MAX_TOKENS, paginate } from '../pagination.js';
 import type { HandleRecord } from '../registry.js';
 import type { PageSnapshot } from '../snapshot.js';
 import { recordBrowserUrl } from '../telemetry.js';
-import { fenceUntrusted } from '../untrusted.js';
+import { defangMarkdownLinks, fenceUntrusted, stripInvisible } from '../untrusted.js';
 
 /** The `session_id` argument shared by every stateful tool. */
 export const sessionIdSchema = z.string().describe('Live session_id from browser_session_create.');
@@ -50,15 +50,19 @@ export type ToolOutcome = CallToolResult | InputRequiredResult;
  * including rejections that occur before a handler runs.
  */
 export async function guard(
-    _deps: ServerDeps,
+    deps: ServerDeps,
     _toolName: string,
     _request: ToolRequest,
     work: () => Promise<ToolOutcome>
 ): Promise<ToolOutcome> {
+    let finish: (() => void) | undefined;
     try {
+        finish = deps.beginTool?.();
         return await work();
     } catch (error) {
         return toolErrorResult(error);
+    } finally {
+        finish?.();
     }
 }
 
@@ -110,9 +114,24 @@ export function fencedSection(
 }
 
 /** Renders the fixed one-line page-state section shared by the stateful tools. */
-export function pageStateLine(snapshot: Pick<PageSnapshot, 'url' | 'title' | 'snapshotId'>): string {
-    return `${snapshot.url}${snapshot.title ? ` — ${snapshot.title}` : ''} (snapshot ${snapshot.snapshotId})`;
+export function pageStateLine(
+    snapshot: Pick<PageSnapshot, 'url' | 'title' | 'snapshotId' | 'unreadableFrames'>
+): string {
+    const missing = snapshot.unreadableFrames;
+    // A form inside a frame that was not read is absent from the snapshot, and nothing else on the
+    // page looks wrong, so the count is part of the page state rather than a footnote.
+    const frames =
+        missing === 0
+            ? ''
+            : ` — ${missing} frame${missing === 1 ? '' : 's'} could not be read, so anything inside is missing`;
+    return fencedPageState(snapshot.url, snapshot.title, ` (snapshot ${snapshot.snapshotId})${frames}`);
 }
 
 export type Sections = EnvelopeSections;
 export { successResult };
+
+/** Page titles and URLs have the same provenance and trust level as the page body. */
+export function fencedPageState(url: string, title: string, suffix = ''): string {
+    const text = defangMarkdownLinks(stripInvisible(`${url}${title ? ` — ${title}` : ''}`)).slice(0, 4096);
+    return fenceUntrusted(`${text}${suffix}`, { finalUrl: stripInvisible(url), fetchedAt: new Date().toISOString() });
+}

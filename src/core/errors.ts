@@ -227,7 +227,7 @@ export interface PageBlockEvidence {
     /** The rendered accessibility text. Already invisible-stripped and password-redacted. */
     text?: string | undefined;
     /** True when the page holds a field the snapshot classified as sensitive, such as a password. */
-    hasPasswordField?: boolean | undefined;
+    hasSensitiveField?: boolean | undefined;
 }
 
 /** A block nobody but a person can clear: a challenge to solve, or a credential to enter. */
@@ -259,7 +259,8 @@ const CAPTCHA_WIDGET_MARKERS: ReadonlyArray<{ vendor: string; marker: string; te
 ];
 
 /** Words that confirm a page holding a password field is asking for one, not offering a reset. */
-const LOGIN_TEXT = /\b(log ?in|sign ?in|password|passphrase|authenticate)\b/i;
+const LOGIN_TEXT =
+    /\b(log ?in|sign ?in|password|passphrase|authenticate|verification code|one[ -]time (?:code|password))\b/i;
 
 /**
  * Recognises a page only a person can get past.
@@ -276,11 +277,10 @@ export function detectInteractiveBlock(evidence: PageBlockEvidence): Interactive
     const widget = CAPTCHA_WIDGET_MARKERS.find(candidate => candidate.test.test(haystack));
     if (widget) return { kind: 'captcha', vendor: widget.vendor, marker: widget.marker };
 
-    // The password field is required, not merely corroborating: nearly every page carries a "Sign
-    // in" link, and treating those as login walls would hand a human the browser on every hop. The
-    // cost is that a wall offering only "Continue with Google" has no field and is not recognised.
-    if (evidence.hasPasswordField && LOGIN_TEXT.test(haystack)) {
-        return { kind: 'login_wall', vendor: 'credentials', marker: 'password_field' };
+    // A rendered sensitive input corroborates login text. A Sign in link alone
+    // must not turn ordinary navigation into a handoff.
+    if (evidence.hasSensitiveField && LOGIN_TEXT.test(haystack)) {
+        return { kind: 'login_wall', vendor: 'credentials', marker: 'sensitive_field' };
     }
     return null;
 }
@@ -316,7 +316,7 @@ const CHALLENGE_CONTROL_NAME =
     /captcha|turnstile|challenge|not a robot|are you a robot|verify|human|press (and hold|&)/i;
 
 /** What the control that submits a credential form is called. */
-const LOGIN_SUBMIT_NAME = /log ?in|sign ?in|continue|next|submit|authenticate|unlock/i;
+const LOGIN_SUBMIT_NAME = /log ?in|sign ?in|continue|next|verify|submit|authenticate|unlock/i;
 
 /**
  * How much else a page may hold before a block on it is read as furniture rather than a wall.
@@ -496,10 +496,16 @@ export function navigationFailedError(url: string, errorText: string): SteelTool
 }
 
 /** Why a `@eN` reference no longer resolves. */
-export type StaleRefReason = 'page_navigated' | 'node_removed' | 'role_or_name_changed' | 'snapshot_superseded';
+export type StaleRefReason =
+    | 'page_navigated'
+    | 'frame_navigated'
+    | 'node_removed'
+    | 'role_or_name_changed'
+    | 'snapshot_superseded';
 
 const STALE_REASON_TEXT: Record<StaleRefReason, string> = {
     page_navigated: 'the page navigated to a new document',
+    frame_navigated: 'the frame holding it loaded a new document',
     node_removed: 'the node was removed from the DOM',
     role_or_name_changed: 'the element changed role or accessible name',
     snapshot_superseded: 'the snapshot it came from has been superseded',
@@ -584,6 +590,24 @@ export function clickLayoutUnavailableError(ref: string, repeated = false): Stee
         code: 'click_blocked',
         details: { ref, reason: 'no_layout_box', ...(repeated ? { handoff_required: true } : {}) },
     });
+}
+
+/** Builds the terminal error after Chrome dispatched the same click twice without observable progress. */
+export function clickNoObservedChangeError(ref: string): SteelToolError {
+    return new SteelToolError(
+        `Chrome dispatched a click on ${ref} twice, but nothing changed on either attempt: no page change or focus move. ` +
+            'Do not retry this control again; change strategy, try another candidate, or call ' +
+            'browser_session_handoff for manual control.',
+        {
+            code: 'click_blocked',
+            details: {
+                ref,
+                reason: 'no_observed_change',
+                handoff_required: true,
+                diagnostic: { pointer_dispatched: true },
+            },
+        }
+    );
 }
 
 /** Capabilities the self-hosted steel-browser image does not have. */

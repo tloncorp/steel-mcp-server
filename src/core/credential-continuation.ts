@@ -18,7 +18,6 @@ export async function credentialContinuation(
 }
 
 export const CREDENTIAL_CONTINUATION_GUIDANCE =
-    'Credentials were supplied securely for this page. This is not proof of sign-in. ' +
-    'Inspect the current page and use browser_run or browser_act to finish the login with its actual controls. ' +
-    'Check validation and pending requests before retrying a submission. Do not request the same credentials again ' +
-    'unless the site rejects them or needs new input. Never read, reveal or retype the filled secrets.';
+    'Sensitive fields were supplied securely for this page. This does not prove sign-in or authorize a purchase or other consequential action. ' +
+    'Inspect the current page, check validation and pending requests, and continue the task using its actual controls. ' +
+    'Do not request the same information again unless the site rejects it or needs new input. Never read, reveal or retype the filled values.';

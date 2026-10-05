@@ -26,6 +26,7 @@ function snapshot(nodes: SnapshotNode[]): PageSnapshot {
         nodes,
         text: '',
         truncated: false,
+        unreadableFrames: 0,
     };
 }
 
@@ -41,6 +42,11 @@ describe('Jev configuration and action space', () => {
             credentialSubmission: true,
         });
         expect(runCandidates(page, [], true).get('click_1')?.confirmation).toBe(true);
+    });
+    it('does not treat filled card/address fields as authorization to continue checkout', () => {
+        const page = snapshot([node({ role: 'button', name: 'Continue' })]);
+        expect(runCandidates(page, [], false, true).get('click_0')).toMatchObject({ confirmation: true });
+        expect(runCandidates(page, [], false, true).get('click_0')?.credentialSubmission).toBeUndefined();
     });
     it('uses only operator inference credentials with the literal OpenRouter model alias', () => {
         expect(loadConfig({ STEEL_LOCAL: 'true' }).jev).toBeUndefined();

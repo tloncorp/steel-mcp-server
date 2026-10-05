@@ -41,11 +41,18 @@ describe.skipIf(!binary)('credential continuation in a real browser', () => {
             connection = await CdpConnection.connect(browser.debuggerUrl);
             const driver = await connection.attachToPage();
             const target = await driver.send<{ targetInfo: { targetId: string } }>('Target.getTargetInfo');
+            const input = await driver.send<{ result: { objectId: string } }>('Runtime.evaluate', {
+                expression: 'document.querySelector("input")',
+            });
+            const anchor = await driver.send<{ node: { backendNodeId: number } }>('DOM.describeNode', {
+                objectId: input.result.objectId,
+            });
             const receipt = {
                 pageId: target.targetInfo.targetId,
                 frameUrl: `${origin}/login`,
                 origin,
-                kind: 'password' as const,
+                kind: 'login' as const,
+                anchorBackendNodeId: anchor.node.backendNodeId,
                 expiresAt: Date.now() + 60_000,
                 submissionAttempted: false,
             };
@@ -54,7 +61,7 @@ describe.skipIf(!binary)('credential continuation in a real browser', () => {
             expect(await page.matchesCredentialContinuation({ ...receipt, origin: 'https://other.test' })).toBe(false);
             const initial = await page.snapshot({ interactiveOnly: false });
             const unrelated = initial.nodes.find(node => node.name === 'Continue')!;
-            expect(await page.isCredentialControl(unrelated.ref!, 'password')).toBe(false);
+            expect(await page.isCredentialControl(unrelated.ref!, receipt)).toBe(false);
             const deps = testDeps({ env, pool });
             deps.api.getCredentialContinuation = async () => {
                 const current = await driver.send<{ result: { value: boolean } }>('Runtime.evaluate', {
@@ -129,6 +136,51 @@ describe.skipIf(!binary)('credential continuation in a real browser', () => {
             site.closeAllConnections();
             if (site.listening) await new Promise<void>(resolve => site.close(() => resolve()));
             await browser.close();
+        }
+    });
+});
+
+describe.skipIf(!binary)('secure form privacy in Chrome', () => {
+    it('redacts identifiers, card data, and addresses from snapshots and refuses a raw screenshot while filled', async () => {
+        const browser = await HeadlessChrome.launch(binary!);
+        const site = createServer((_req, res) => {
+            res.setHeader('Content-Type', 'text/html');
+            res.end(`<form><input value="private-unlabelled-identifier"><input type="password" value="private-unlabelled-password"><button>Sign in</button></form><form><label>Email<input autocomplete="username" value="private-identifier@example.test"></label>
+                <label>Card number<input autocomplete="section-payment billing cc-number" value="4111111111111111"></label>
+                <label>Street address<textarea autocomplete="shipping street-address">731 Private Lane</textarea></label>
+                <label>City<input name="city" value="Privateville"></label>
+                <input maxlength="1" value="7"><label>Country<select autocomplete="country"><option value="CA">Canada</option></select></label><button>Continue</button></form>`);
+        });
+        const pool = new CdpSessionPool(loadConfig({ STEEL_LOCAL: 'true' }), 1, () =>
+            CdpConnection.connect(browser.debuggerUrl)
+        );
+        try {
+            await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));
+            const address = site.address();
+            if (!address || typeof address === 'string') throw new Error('No fixture listener');
+            const page = await pool.page('privacy-fixture');
+            await page.navigate(`http://127.0.0.1:${address.port}/form`);
+            const snapshot = await page.snapshot({ interactiveOnly: false });
+            for (const value of [
+                'private-unlabelled-identifier',
+                'private-unlabelled-password',
+                'private-identifier@example.test',
+                '4111111111111111',
+                '731 Private Lane',
+                'Privateville',
+            ])
+                expect(JSON.stringify(snapshot)).not.toContain(value);
+            for (const label of ['Email', 'Card number', 'Street address', 'City', 'Country']) {
+                expect(snapshot.nodes.find(node => node.name === label && node.interactive)).toMatchObject({
+                    sensitive: true,
+                });
+            }
+            await expect(page.captureScreenshot({ fullPage: false })).rejects.toMatchObject({ code: 'forbidden' });
+        } finally {
+            await pool.close('privacy-fixture');
+            await browser.close();
+            site.closeAllConnections();
+            await new Promise<void>(resolve => site.close(() => resolve()));
         }
     });
 });

@@ -762,7 +762,7 @@ describe.skipIf(!available)('the session viewer in a real browser', () => {
             const { cdp, viewer } = await painting();
 
             const html = await viewer.documentHtml();
-            expect(html).toContain('Steel live browser session');
+            expect(html).toContain('Live browser session');
             expect(html).not.toContain(cdp.token);
             expect(html).not.toContain('wss://127.0.0.1');
             expect(html).not.toContain('token=');

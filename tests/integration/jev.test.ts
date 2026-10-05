@@ -70,7 +70,8 @@ describe('Jev browser runner', () => {
             pageId: 'target',
             frameUrl: 'https://app.test/login',
             origin: 'https://app.test',
-            kind: 'password',
+            kind: 'login',
+            anchorBackendNodeId: 42,
             expiresAt: Date.now() + 60_000,
             submissionAttempted: false,
         });
@@ -83,7 +84,7 @@ describe('Jev browser runner', () => {
         });
         deps.jevFetch = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
             const body = JSON.parse(String(init?.body));
-            expect(body.state.credential_continuation).toContain('not proof of sign-in');
+            expect(body.state.credential_continuation).toContain('does not prove sign-in');
             expect(String(init?.body)).not.toContain('supersecret');
             const action = Object.entries(body.questions.action.criteria).find(
                 ([, label]) => label === 'Click button Sign in'
@@ -113,7 +114,8 @@ describe('Jev browser runner', () => {
             pageId: 'target',
             frameUrl: 'https://app.test/login',
             origin: 'https://app.test',
-            kind: 'password',
+            kind: 'login',
+            anchorBackendNodeId: 42,
             expiresAt: Date.now() + 60_000,
             submissionAttempted: true,
         });
@@ -367,11 +369,27 @@ describe('Jev browser runner', () => {
         deps.limiter = { charge };
         const { client } = await connect(deps);
         const record = await session(deps);
+        await deps.pool.page(record.steelSessionId);
+        const fixture = deps.pool.fixtureFor(record.steelSessionId)!;
+        fixture.stub('Input.dispatchMouseEvent', params => {
+            if (params.type === 'mouseReleased') {
+                fixture.emit('Page.frameStartedNavigating', {
+                    frameId: 'main-frame',
+                    url: 'https://example.com/results',
+                    navigationType: 'differentDocument',
+                });
+                fixture.emit('Page.loadEventFired', {});
+            }
+            return {};
+        });
         const result = await client.callTool({
             name: 'browser_run',
             arguments: { session_id: record.handle, task: 'Search', max_steps: 2 },
         });
-        expect(result.structuredContent).toMatchObject({ status: 'max_steps', usage: { calls: 2 } });
+        expect(result.structuredContent, JSON.stringify(result.structuredContent)).toMatchObject({
+            status: 'max_steps',
+            usage: { calls: 2 },
+        });
         expect(charge).toHaveBeenCalledTimes(3);
     });
 });

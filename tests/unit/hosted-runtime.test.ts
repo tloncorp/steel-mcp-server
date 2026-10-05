@@ -1,6 +1,6 @@
 // ABOUTME: Unit tests for the hosted dependency runtime: clients reused per principal and isolated
 // ABOUTME: across credentials, per-principal budgets, owner-routed releases, and the registry backend.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../../src/core/config.js';
 import type { SessionPool } from '../../src/core/context.js';
 import type { BrowserPage } from '../../src/core/page.js';
@@ -286,5 +286,92 @@ describe('createHandleRegistryBackend', () => {
         expect(() =>
             createHandleRegistryBackend({ env: { ...SHARED_SECRET, REDIS_URL: 'redis://cache:6379' } })
         ).toThrow(/onError/);
+    });
+});
+
+describe('bounded hosted tenants and cleanup', () => {
+    it('does not retain discovery-only callers and refuses allocations beyond the bound', async () => {
+        const runtime = new HostedRuntime({
+            configForCredential: credential => loadConfig({ STEEL_API_KEY: credential }),
+            maxTenants: 2,
+        });
+        for (let i = 0; i < 10; i++)
+            runtime.depsForRequest({
+                ...input(`invalid-${i}`),
+                request: new Request('https://mcp.steel.dev/mcp', { headers: { 'mcp-method': 'server/discover' } }),
+            });
+        const a = runtime.depsForRequest(input('a'));
+        runtime.depsForRequest(input('b'));
+        expect(() => runtime.depsForRequest(input('c'))).toThrow(/capacity/i);
+        expect(runtime.depsForRequest(input('a')).api).toBe(a.api);
+        await runtime.close();
+    });
+    it('evicts idle tenants but pins active calls and live sessions', async () => {
+        let now = Date.now();
+        const pools: Array<ReturnType<typeof vi.fn>> = [];
+        const runtime = new HostedRuntime({
+            configForCredential: credential => loadConfig({ STEEL_API_KEY: credential }),
+            maxTenants: 3,
+            tenantIdleMs: 100,
+            now: () => new Date(now),
+            createPool: () => {
+                const close = vi.fn(async () => {});
+                pools.push(close);
+                return {
+                    page: async () => {
+                        throw new Error('unused');
+                    },
+                    close: async () => {},
+                    closeAll: close,
+                };
+            },
+            createApi: () => new FakeSteelApi(),
+        });
+        const idle = runtime.depsForRequest(input('idle'));
+        const busy = runtime.depsForRequest(input('busy'));
+        const live = runtime.depsForRequest(input('live'));
+        const finish = busy.beginTool!();
+        await live.registry.create({
+            principal: live.principal,
+            steelSessionId: 'live-session',
+            expiresAt: now + 60000,
+        });
+        now += 101;
+        expect(await runtime.pruneIdleTenants()).toBe(1);
+        expect(pools[0]).toHaveBeenCalledOnce();
+        expect(pools[1]).not.toHaveBeenCalled();
+        expect(pools[2]).not.toHaveBeenCalled();
+        expect(() => idle.beginTool!()).toThrow(/retry/i);
+        expect(runtime.depsForRequest(input('new')).api).toBeDefined();
+        finish();
+        await runtime.close();
+    });
+    it('closes every pool even when upstream session release fails', async () => {
+        const closeAll = vi.fn(async () => {});
+        const runtime = new HostedRuntime({
+            configForCredential: credential => loadConfig({ STEEL_API_KEY: credential }),
+            createApi: () =>
+                ({
+                    ...new FakeSteelApi(),
+                    releaseSession: async () => {
+                        throw new Error('unavailable');
+                    },
+                }) as unknown as FakeSteelApi,
+            createPool: () => ({
+                page: async () => {
+                    throw new Error('unused');
+                },
+                close: async () => {},
+                closeAll,
+            }),
+        });
+        const deps = runtime.depsForRequest(input('owner'));
+        await deps.registry.create({
+            principal: deps.principal,
+            steelSessionId: 'first',
+            expiresAt: Date.now() + 60000,
+        });
+        await expect(runtime.close()).rejects.toBeInstanceOf(AggregateError);
+        expect(closeAll).toHaveBeenCalledOnce();
     });
 });

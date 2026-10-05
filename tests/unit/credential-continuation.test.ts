@@ -7,7 +7,8 @@ const receipt: CredentialContinuation = {
     pageId: 'target',
     frameUrl: 'https://example.test/login',
     origin: 'https://example.test',
-    kind: 'password',
+    kind: 'login',
+    anchorBackendNodeId: 42,
     expiresAt: Date.now() + 60_000,
     submissionAttempted: false,
 };

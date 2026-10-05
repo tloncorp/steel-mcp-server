@@ -36,6 +36,8 @@ export interface SessionPool {
 
 /** Everything the tool layer needs. Held at module scope and closed over by the server factory. */
 export interface ServerDeps {
+    /** Pins hosted clients for one tool operation; the returned callback releases the pin. */
+    beginTool?: (() => () => void) | undefined;
     config: SteelConfig;
     api: SteelApi;
     registry: HandleRegistry;

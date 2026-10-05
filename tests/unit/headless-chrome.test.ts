@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HeadlessChrome, type LaunchWatch, readDebuggerUrl, terminateProcess } from '../helpers/headless-chrome.js';
 
 const profiles: string[] = [];
@@ -25,6 +25,7 @@ function watch(overrides: Partial<LaunchWatch> = {}): LaunchWatch {
 }
 
 afterEach(() => {
+    vi.restoreAllMocks();
     while (profiles.length > 0) rmSync(profiles.pop()!, { recursive: true, force: true });
 });
 
@@ -66,6 +67,7 @@ describe('Chrome launch observations', () => {
     it('checks process ending again after its final poll instead of misreporting a timeout', async () => {
         const directory = profile();
         let observations = 0;
+        vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(1);
 
         await expect(
             readDebuggerUrl(

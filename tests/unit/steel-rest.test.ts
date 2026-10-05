@@ -259,7 +259,9 @@ describe('SteelRestClient trace propagation', () => {
         const clientSpan = harness.span('steel browser_tool');
         const { traceId, spanId } = clientSpan.spanContext();
         expect(calls[0]!.headers.traceparent).toBe(`00-${traceId}-${spanId}-01`);
-        expect(clientSpan.parentSpanContext?.spanId).toBe(harness.span('tools/call browser_scrape').spanContext().spanId);
+        expect(clientSpan.parentSpanContext?.spanId).toBe(
+            harness.span('tools/call browser_scrape').spanContext().spanId
+        );
         await harness.shutdown();
     });
 

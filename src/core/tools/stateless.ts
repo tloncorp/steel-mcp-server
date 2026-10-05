@@ -302,7 +302,7 @@ export function registerScreenshot(host: ToolHost, deps: ServerDeps): void {
                     session_id: z
                         .string()
                         .optional()
-                        .describe('Capture the current page of this session instead. Returns the image inline.'),
+                        .describe('Session image. For filled private fields, use browser_snapshot.'),
                     full_page: z
                         .boolean()
                         .optional()

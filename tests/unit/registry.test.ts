@@ -554,3 +554,35 @@ describe('InMemoryHandleRegistry.countLive', () => {
         expect(await registry.countLive(ORG_B)).toBe(1);
     });
 });
+
+describe('exhaustive shutdown', () => {
+    it('releases human-controlled sessions on shutdown, then releases the remaining sessions', async () => {
+        const { registry, released } = newRegistry();
+        const first = await registry.create({
+            principal: ORG_A,
+            steelSessionId: 'first',
+            expiresAt: Date.now() + 60000,
+        });
+        await registry.create({ principal: ORG_A, steelSessionId: 'second', expiresAt: Date.now() + 60000 });
+        await registry.acquireHumanControl(first.handle, ORG_A, 30000);
+        await expect(registry.release(first.handle, ORG_A, 'explicit')).rejects.toMatchObject({
+            code: 'human_control_active',
+        });
+        expect(await registry.releaseAll('stream_close')).toBe(2);
+        expect(released).toEqual(['first', 'second']);
+    });
+    it('attempts every release before reporting aggregated shutdown failures', async () => {
+        const attempted: string[] = [];
+        const registry = new InMemoryHandleRegistry({
+            releaseSteelSession: async id => {
+                attempted.push(id);
+                if (id === 'first') throw new Error('unavailable');
+            },
+        });
+        await registry.create({ principal: ORG_A, steelSessionId: 'first', expiresAt: Date.now() + 60000 });
+        await registry.create({ principal: ORG_A, steelSessionId: 'second', expiresAt: Date.now() + 60000 });
+        await expect(registry.releaseAll('stream_close')).rejects.toBeInstanceOf(AggregateError);
+        expect(attempted).toEqual(['first', 'second']);
+        expect(await registry.countLive(ORG_A)).toBe(1);
+    });
+});

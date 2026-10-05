@@ -107,6 +107,9 @@ export interface HandleRegistry {
     release(handle: string, principal: string, path: ReleasePath): Promise<HandleRecord | null>;
     list(principal: string): Promise<HandleRecord[]>;
     countLive(principal: string): Promise<number>;
+    /** Counts pending creates and live sessions together, atomically across callers. */
+    reserveSessionSlot(principal: string, steelSessionId: string, expiresAt: number, limit: number): Promise<boolean>;
+    releaseSessionSlot(principal: string, steelSessionId: string): Promise<void>;
     reap(options: ReapOptions): Promise<number>;
     /** Releases every process-owned record during transport/runtime shutdown. Shared stores no-op. */
     releaseAll(path: 'stream_close'): Promise<number>;
@@ -191,6 +194,7 @@ export class InMemoryHandleRegistry implements HandleRegistry {
     readonly shutdownScope = 'process_owned' as const;
     readonly registryBackend = 'memory' as const;
     private readonly records = new Map<string, HandleRecord>();
+    private readonly sessionSlots = new Map<string, Map<string, number>>();
     private readonly profileWriters = new Map<string, { owner: string; until: number }>();
     private readonly counts: Record<ReleasePath, number> = { explicit: 0, stream_close: 0, idle: 0, hard_expiry: 0 };
 
@@ -329,7 +333,7 @@ export class InMemoryHandleRegistry implements HandleRegistry {
             throw handleNotFoundError();
         }
         if (record.releasing) return null;
-        if (record.humanControl && record.humanControl.leaseUntil > Date.now()) {
+        if (path !== 'stream_close' && record.humanControl && record.humanControl.leaseUntil > Date.now()) {
             throw humanControlError(record.humanControl.leaseUntil);
         }
         record.releasing = true;
@@ -340,6 +344,7 @@ export class InMemoryHandleRegistry implements HandleRegistry {
             throw error;
         }
         this.records.delete(handle);
+        await this.releaseSessionSlot(principal, record.steelSessionId);
         if (record.mitigation.persistProfile && record.mitigation.profileId) {
             await this.releaseProfileWriter(record.principal, record.mitigation.profileId, record.steelSessionId);
         }
@@ -355,8 +360,32 @@ export class InMemoryHandleRegistry implements HandleRegistry {
         return (await this.list(principal)).length;
     }
 
+    async reserveSessionSlot(principal: string, owner: string, expiresAt: number, limit: number): Promise<boolean> {
+        const now = Date.now();
+        const slots = this.sessionSlots.get(principal) ?? new Map<string, number>();
+        for (const [id, until] of slots) if (until <= now) slots.delete(id);
+        for (const record of this.records.values()) {
+            if (record.principal === principal && record.expiresAt > now)
+                slots.set(record.steelSessionId, record.expiresAt);
+        }
+        this.sessionSlots.set(principal, slots);
+        if (expiresAt <= now || (!slots.has(owner) && slots.size >= limit)) return false;
+        slots.set(owner, expiresAt);
+        return true;
+    }
+
+    async releaseSessionSlot(principal: string, owner: string): Promise<void> {
+        const slots = this.sessionSlots.get(principal);
+        slots?.delete(owner);
+        if (slots?.size === 0) this.sessionSlots.delete(principal);
+    }
+
     async reap(options: ReapOptions): Promise<number> {
         const now = Date.now();
+        for (const [principal, slots] of this.sessionSlots) {
+            for (const [id, until] of slots) if (until <= now) slots.delete(id);
+            if (!slots.size) this.sessionSlots.delete(principal);
+        }
         let reaped = 0;
         for (const record of [...this.records.values()]) {
             const awaitingHuman =
@@ -370,6 +399,7 @@ export class InMemoryHandleRegistry implements HandleRegistry {
                 record.releasing = true;
                 await this.deps.releaseSteelSession(record.steelSessionId, record.principal);
                 this.records.delete(record.handle);
+                await this.releaseSessionSlot(record.principal, record.steelSessionId);
                 if (record.mitigation.persistProfile && record.mitigation.profileId) {
                     await this.releaseProfileWriter(
                         record.principal,
@@ -391,9 +421,16 @@ export class InMemoryHandleRegistry implements HandleRegistry {
 
     async releaseAll(path: 'stream_close'): Promise<number> {
         let released = 0;
+        const errors: unknown[] = [];
         for (const record of [...this.records.values()]) {
-            if (await this.release(record.handle, record.principal, path)) released += 1;
+            try {
+                if (await this.release(record.handle, record.principal, path)) released += 1;
+            } catch (error) {
+                errors.push(error);
+            }
         }
+        if (errors.length)
+            throw new AggregateError(errors, 'Some browser sessions could not be released during shutdown.');
         return released;
     }
 
