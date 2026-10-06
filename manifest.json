@@ -118,6 +118,10 @@
         {
             "name": "browser_session_live_view",
             "description": "Return the connection details the inline session viewer needs. Returns no page content, and hosts hide it from the model."
+        },
+        {
+            "name": "browser_session_monitor",
+            "description": "Read service-owned handoff status without advancing the browser."
         }
     ],
     "compatibility": {

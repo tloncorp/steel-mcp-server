@@ -98,7 +98,7 @@ Deployment, Redis, tracing, and the client snippets are in [docs/HOSTING.md](doc
 
 ## Tools
 
-The default `browse` profile exposes sixteen tools. `STEEL_PROFILE=scrape` exposes only the first
+The default `browse` profile exposes eighteen tools. `STEEL_PROFILE=scrape` exposes only the first
 three, which never start a browser.
 
 <details>
@@ -123,6 +123,7 @@ three, which never start a browser.
 | `browser_batch` | Run known reversible steps in one call; hands off before login, payment, or final confirmation |
 | `browser_session_options` | Plan a non-default session and discover saved profile IDs or managed-login namespaces |
 | `browser_session_live_view` | Feeds the inline viewer its connection details. Hosts hide it from the model |
+| `browser_session_monitor` | Gateway-only read of service-owned handoff receipts. No DOM reads, session renewal or agent continuation; requires the self-hosted monitor-status endpoint |
 
 </details>
 

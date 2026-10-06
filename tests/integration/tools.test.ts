@@ -117,6 +117,7 @@ describe('tools/list', () => {
             // Listed, and last: the spec has the host filter an app-only tool out of what the model
             // sees, which means the server does list it.
             'browser_session_live_view',
+            'browser_session_monitor',
         ]);
     });
 

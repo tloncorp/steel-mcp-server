@@ -61,6 +61,7 @@ export const TOOL_COSTS: Readonly<Record<string, number>> = {
     browser_session_options: 3,
     // App control heartbeats must not consume the model's browser budget.
     browser_session_live_view: 0,
+    browser_session_monitor: 0,
     browser_session_release: 0,
 };
 

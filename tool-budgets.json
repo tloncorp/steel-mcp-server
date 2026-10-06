@@ -3,7 +3,7 @@
     "instructionsBytes": 2048,
     "profiles": {
         "scrape": { "tools": 3, "bytes": 4000 },
-        "browse": { "tools": 17, "bytes": 18000 }
+        "browse": { "tools": 18, "bytes": 18500 }
     },
     "toolBytes": {
         "browser_session_create": 1200,

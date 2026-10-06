@@ -14,11 +14,11 @@ describe('toolsForProfile', () => {
     });
 
     it('gives browse the full default surface', () => {
-        expect(toolsForProfile('browse')).toHaveLength(17);
+        expect(toolsForProfile('browse')).toHaveLength(18);
         expect(toolsForProfile('browse').map(tool => tool.name)).toContain('browser_session_handoff');
         expect(toolsForProfile('browse').map(tool => tool.name)).toContain('browser_session_replay');
-        expect(toolsForProfile('browse').at(-2)?.name).toBe('browser_session_options');
-        expect(toolsForProfile('browse').at(-1)?.name).toBe('browser_session_live_view');
+        expect(toolsForProfile('browse').at(-3)?.name).toBe('browser_session_options');
+        expect(toolsForProfile('browse').at(-2)?.name).toBe('browser_session_live_view');
     });
 
     it('resolves every declared profile name', () => {
