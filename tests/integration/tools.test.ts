@@ -1265,9 +1265,9 @@ describe('browser_session_create', () => {
         expect(textOf(result)).toMatch(/do not guess another namespace.*session_options/i);
     });
 
-    it('returns an opaque handle that is not the Steel session id', async () => {
+    it('returns a readable handle independent of the Steel session id', async () => {
         const handle = await newSession();
-        expect(handle.startsWith('sess_')).toBe(true);
+        expect(handle).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
         expect(handle).not.toContain(harness.deps.api.created[0]!.sessionId);
     });
 
@@ -1367,7 +1367,7 @@ describe('stateful tools reject an unknown handle', () => {
         for (const call of calls) {
             const result = await harness.client.callTool({
                 name: call.name,
-                arguments: { session_id: 'sess_someoneelse', ...call.arguments },
+                arguments: { session_id: 'other-red-fox', ...call.arguments },
             });
             expect(isError(result), `${call.name} accepted an unknown handle`).toBe(true);
             expect(textOf(result)).toMatch(/no live browser session/i);

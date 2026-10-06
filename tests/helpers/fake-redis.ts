@@ -1,7 +1,7 @@
 // ABOUTME: In-memory stand-ins for Redis: a store the handle registry can be driven against, a gate
 // ABOUTME: that holds one replica's commands to force an interleaving, and a command-recording client.
 import type { RedisClient } from '../../src/core/redis.js';
-import type { RedisCommands } from '../../src/core/registry-redis.js';
+import type { RedisCommands, RedisHandleKeys } from '../../src/core/registry-redis.js';
 
 export interface FakeRedisOptions {
     /** The clock TTLs are measured against, so a test can expire a key by moving time. */
@@ -32,6 +32,30 @@ export class FakeRedis implements RedisCommands {
             return null;
         }
         return entry.value;
+    }
+
+    async claimHandle(keys: RedisHandleKeys, value: string, ttlMs: number): Promise<boolean> {
+        if (this.read(keys.record) !== null) return false;
+        this.values.set(keys.record, { value, expiresAtMs: this.nowMs() + ttlMs });
+        for (const key of keys.fields) this.values.delete(key);
+        for (const [key, member] of [
+            [keys.principalIndex, keys.handle],
+            [keys.liveIndex, keys.member],
+        ] as const) {
+            const members = this.sets.get(key) ?? new Set<string>();
+            members.add(member);
+            this.sets.set(key, members);
+        }
+        return true;
+    }
+
+    async forgetHandle(keys: RedisHandleKeys, expected: string | null, removeRecord: boolean): Promise<boolean> {
+        if (this.read(keys.record) !== expected) return false;
+        const removed = removeRecord && this.values.delete(keys.record);
+        if (removeRecord) for (const key of keys.fields) this.values.delete(key);
+        this.sets.get(keys.principalIndex)?.delete(keys.handle);
+        this.sets.get(keys.liveIndex)?.delete(keys.member);
+        return removed;
     }
 
     async get(key: string): Promise<string | null> {
@@ -168,6 +192,14 @@ export class GatedRedis implements RedisCommands {
 
     async get(key: string): Promise<string | null> {
         return this.gated(() => this.inner.get(key));
+    }
+
+    async claimHandle(keys: RedisHandleKeys, value: string, ttlMs: number): Promise<boolean> {
+        return this.gated(() => this.inner.claimHandle(keys, value, ttlMs));
+    }
+
+    async forgetHandle(keys: RedisHandleKeys, expected: string | null, removeRecord: boolean): Promise<boolean> {
+        return this.gated(() => this.inner.forgetHandle(keys, expected, removeRecord));
     }
 
     async set(key: string, value: string, ttlMs: number): Promise<void> {

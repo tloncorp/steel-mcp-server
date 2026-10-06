@@ -136,13 +136,19 @@ The inference key belongs in the operator's secret configuration, not the moon's
 MCP upstream headers. The moon's `X-Api-Key` continues to identify its browser tenant.
 Without an OpenRouter key, the ordinary browser tools remain available.
 
+Session IDs use randomly chosen `adjective-color-animal` names, such as
+`nimble-purple-otter`. The registry checks every candidate against reserved names
+and retries collisions. Successful release or expiry cleanup frees the name for
+reuse; pending or failed cleanup keeps it reserved. Every request still verifies
+the caller's credential: a session name grants no access by itself.
+
 Create a session, navigate to the starting page, then call:
 
 ```json
 {
   "name": "browser_run",
   "arguments": {
-    "session_id": "sess_...",
+    "session_id": "nimble-purple-otter",
     "task": "Search for espresso and open the matching article",
     "inputs": [{ "field": "Search", "value": "espresso" }],
     "max_steps": 12,

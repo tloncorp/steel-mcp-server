@@ -246,11 +246,11 @@ describe('browser_session_create', () => {
         expect(viewerTools).toEqual(['browser_session_create']);
     });
 
-    it('returns exactly what it always did', async () => {
+    it('returns a readable session handle in the tool instructions', async () => {
         const harness = await connect();
         const result = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
         expect(textOf(result)).toContain('Started a browser session.');
-        expect(textOf(result)).toContain('Pass session_id="sess_');
+        expect(textOf(result)).toMatch(/Pass session_id="[a-z]+-[a-z]+-[a-z]+"/);
     });
 });
 
