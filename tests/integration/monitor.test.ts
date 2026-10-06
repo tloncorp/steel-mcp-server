@@ -24,7 +24,7 @@ it('authorizes monitoring by tenant, projects metadata and never renews or opera
     try {
         const result = await client.callTool({ name: 'browser_session_create', arguments: {} });
         const handle = (result.structuredContent as { session_id: string }).session_id;
-        expect(handle).toBeTruthy();
+        expect(handle).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
         const touch = vi.spyOn(deps.registry, 'touch');
         const page = vi.spyOn(deps.pool, 'page');
         const monitored = await client.callTool({ name: 'browser_session_monitor', arguments: { session_id: handle } });
@@ -38,7 +38,7 @@ it('authorizes monitoring by tenant, projects metadata and never renews or opera
         expect(page).not.toHaveBeenCalled();
         const denied = await client.callTool({
             name: 'browser_session_monitor',
-            arguments: { session_id: 'sess_' + 'z'.repeat(22) },
+            arguments: { session_id: 'missing-blue-otter' },
         });
         expect(denied.isError).toBe(true);
         expect(read).toHaveBeenCalledTimes(1);

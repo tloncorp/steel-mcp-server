@@ -39,6 +39,48 @@ export function redisConnection(client: RedisClient, onError: (error: unknown) =
     client.on('error', onError);
 
     const commands: RedisCommands = {
+        claimHandle: async (keys, value, ttlMs) =>
+            (await client.eval(
+                `if not redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX') then return 0 end
+                redis.call('DEL', KEYS[2], KEYS[3], KEYS[4], KEYS[5])
+                redis.call('SADD', KEYS[6], ARGV[3])
+                redis.call('SADD', KEYS[7], ARGV[4])
+                return 1`,
+                7,
+                keys.record,
+                ...keys.fields,
+                keys.principalIndex,
+                keys.liveIndex,
+                value,
+                ttlMs,
+                keys.handle,
+                keys.member
+            )) === 1,
+        forgetHandle: async (keys, expected, removeRecord) =>
+            (await client.eval(
+                `local current = redis.call('GET', KEYS[1])
+                if ARGV[1] == '1' then
+                    if current then return 0 end
+                elseif current ~= ARGV[2] then return 0 end
+                local removed = 0
+                if ARGV[3] == '1' then
+                    if current then removed = 1 end
+                    redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5])
+                end
+                redis.call('SREM', KEYS[6], ARGV[4])
+                redis.call('SREM', KEYS[7], ARGV[5])
+                return removed`,
+                7,
+                keys.record,
+                ...keys.fields,
+                keys.principalIndex,
+                keys.liveIndex,
+                expected === null ? '1' : '0',
+                expected ?? '',
+                removeRecord ? '1' : '0',
+                keys.handle,
+                keys.member
+            )) === 1,
         get: key => client.get(key),
         set: async (key, value, ttlMs) => {
             await client.set(key, value, 'PX', ttlMs);

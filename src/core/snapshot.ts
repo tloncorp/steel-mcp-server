@@ -844,7 +844,8 @@ export class PageState {
             const sensitive =
                 nodeFacts === undefined
                     ? rawValue !== undefined
-                    : credentialNeighbours.has(backendNodeId ?? -1) ||
+                    : nodeFacts.attributes['data-tlon-sensitive'] === 'true' ||
+                      credentialNeighbours.has(backendNodeId ?? -1) ||
                       isSensitiveField({
                           tagName: nodeFacts.tagName,
                           type: nodeFacts.attributes.type,

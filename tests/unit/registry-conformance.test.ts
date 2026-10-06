@@ -9,6 +9,7 @@ import {
     type RegistryDeps,
 } from '../../src/core/registry.js';
 import { RedisHandleRegistry } from '../../src/core/registry-redis.js';
+import { HANDLE_ALLOCATION_ATTEMPTS, mintHandle } from '../../src/core/session-name.js';
 import { FakeRedis } from '../helpers/fake-redis.js';
 
 const ORG_A = principalFromCredential('ste-key-a');
@@ -49,13 +50,16 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
     let released: Array<[string, string]>;
     let releaseFails: (id: string) => boolean;
     let reapErrors: unknown[];
+    let generateHandle: ReturnType<typeof vi.fn<() => string>>;
 
     beforeEach(() => {
         vi.useFakeTimers({ now: START_MS });
         released = [];
         reapErrors = [];
         releaseFails = () => false;
+        generateHandle = vi.fn(mintHandle);
         registry = build({
+            generateHandle,
             releaseSteelSession: async (steelSessionId, principal) => {
                 if (releaseFails(steelSessionId)) throw new Error(`steel unreachable for ${steelSessionId}`);
                 released.push([steelSessionId, principal]);
@@ -103,6 +107,117 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
     });
 
     describe('create and resolve', () => {
+        it('retries collisions across principals without changing the reserved record', async () => {
+            generateHandle
+                .mockReturnValueOnce('nimble-purple-otter')
+                .mockReturnValueOnce('nimble-purple-otter')
+                .mockReturnValueOnce('calm-blue-fox');
+            const first = await registry.create({
+                principal: ORG_A,
+                steelSessionId: 's1',
+                expiresAt: Date.now() + 60_000,
+            });
+            const second = await registry.create({
+                principal: ORG_B,
+                steelSessionId: 's2',
+                expiresAt: Date.now() + 60_000,
+            });
+            expect(first.handle).toBe('nimble-purple-otter');
+            expect(second.handle).toBe('calm-blue-fox');
+            expect(await registry.resolve(first.handle, ORG_A)).toMatchObject({ steelSessionId: 's1' });
+            expect(await registry.list(ORG_B)).toHaveLength(1);
+        });
+
+        it('bounds allocation retries without overwriting an occupied name', async () => {
+            generateHandle.mockReturnValue('nimble-purple-otter');
+            await registry.create({ principal: ORG_A, steelSessionId: 's1', expiresAt: Date.now() + 60_000 });
+            generateHandle.mockClear();
+            await expect(
+                registry.create({ principal: ORG_A, steelSessionId: 's2', expiresAt: Date.now() + 60_000 })
+            ).rejects.toMatchObject({ code: 'rate_limited' });
+            expect(generateHandle).toHaveBeenCalledTimes(HANDLE_ALLOCATION_ATTEMPTS);
+            expect(await registry.resolve('nimble-purple-otter', ORG_A)).toMatchObject({ steelSessionId: 's1' });
+        });
+
+        it.each(['explicit', 'idle', 'hard_expiry'] as const)('makes a name reusable after %s cleanup', async path => {
+            generateHandle.mockReturnValue('nimble-purple-otter');
+            const first = await registry.create({
+                principal: ORG_A,
+                steelSessionId: 's1',
+                expiresAt: Date.now() + 60_000,
+            });
+            await registry.recordHandoff(first.handle);
+            await registry.touch(first.handle);
+            if (path === 'explicit') await registry.release(first.handle, ORG_A, path);
+            else {
+                advance(path === 'idle' ? 1_000 : 60_000);
+                expect(await registry.reap({ idleMs: path === 'idle' ? 1_000 : 120_000 })).toBe(1);
+            }
+            const second = await registry.create({
+                principal: ORG_B,
+                steelSessionId: 's2',
+                expiresAt: Date.now() + 60_000,
+            });
+            expect(second.handle).toBe(first.handle);
+            expect(await registry.resolve(second.handle, ORG_B)).toMatchObject({
+                steelSessionId: 's2',
+                handoffRounds: 0,
+                lastUsedAt: Date.now(),
+            });
+            await expect(registry.resolve(second.handle, ORG_A)).rejects.toMatchObject({ code: 'not_found' });
+            expect(await registry.list(ORG_A)).toEqual([]);
+            expect(await registry.list(ORG_B)).toHaveLength(1);
+        });
+
+        it('reserves an expired name until failed cleanup succeeds', async () => {
+            generateHandle.mockReturnValue('nimble-purple-otter');
+            await registry.create({ principal: ORG_A, steelSessionId: 's1', expiresAt: Date.now() + 100 });
+            advance(100);
+            releaseFails = () => true;
+            expect(await registry.reap({ idleMs: 0 })).toBe(0);
+            await expect(
+                registry.create({ principal: ORG_B, steelSessionId: 's2', expiresAt: Date.now() + 60_000 })
+            ).rejects.toMatchObject({ code: 'rate_limited' });
+            releaseFails = () => false;
+            expect(await registry.reap({ idleMs: 0 })).toBe(1);
+            await expect(
+                registry.create({ principal: ORG_B, steelSessionId: 's2', expiresAt: Date.now() + 60_000 })
+            ).resolves.toMatchObject({ handle: 'nimble-purple-otter' });
+        });
+
+        it('keeps a name reserved while browser release is still pending', async () => {
+            let started!: () => void;
+            let finish!: () => void;
+            const ready = new Promise<void>(resolve => {
+                started = resolve;
+            });
+            const gate = new Promise<void>(resolve => {
+                finish = resolve;
+            });
+            const pendingRegistry = build({
+                generateHandle: () => 'nimble-purple-otter',
+                releaseSteelSession: async () => {
+                    started();
+                    await gate;
+                },
+            });
+            const first = await pendingRegistry.create({
+                principal: ORG_A,
+                steelSessionId: 's1',
+                expiresAt: Date.now() + 60_000,
+            });
+            const pending = pendingRegistry.release(first.handle, ORG_A, 'explicit');
+            await ready;
+            await expect(
+                pendingRegistry.create({ principal: ORG_B, steelSessionId: 's2', expiresAt: Date.now() + 60_000 })
+            ).rejects.toMatchObject({ code: 'rate_limited' });
+            finish();
+            await pending;
+            await expect(
+                pendingRegistry.create({ principal: ORG_B, steelSessionId: 's2', expiresAt: Date.now() + 60_000 })
+            ).resolves.toMatchObject({ handle: first.handle });
+        });
+
         it('round-trips every field a tool reads back off the handle', async () => {
             // debugUrl is the live-player URL the human-in-the-loop handoff elicits with. A backend
             // that drops it turns every login wall into a dead end instead of a handoff.
@@ -141,13 +256,13 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
             expect((await registry.resolve(handle, ORG_A)).mitigation).toEqual({});
         });
 
-        it('mints an opaque handle that leaks neither the principal nor the Steel session id', async () => {
+        it('mints a readable handle that leaks neither the principal nor the Steel session id', async () => {
             const { handle } = await registry.create({
                 principal: ORG_A,
                 steelSessionId: 'steel-1',
                 expiresAt: Date.now() + 600_000,
             });
-            expect(handle.startsWith('sess_')).toBe(true);
+            expect(handle).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
             expect(handle).not.toContain(ORG_A);
             expect(handle).not.toContain('steel-1');
         });
@@ -160,7 +275,7 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
             });
 
             const foreign = await captureError(registry.resolve(handle, ORG_B));
-            const unknown = await captureError(registry.resolve('sess_nope', ORG_B));
+            const unknown = await captureError(registry.resolve('missing-blue-fox', ORG_B));
             expect(foreign.code).toBe('not_found');
             expect(foreign.message).toBe(unknown.message);
         });
@@ -206,7 +321,7 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
         });
 
         it('ignores an unknown handle instead of throwing', async () => {
-            await expect(registry.touch('sess_nope')).resolves.toBeUndefined();
+            await expect(registry.touch('missing-blue-fox')).resolves.toBeUndefined();
         });
     });
 
@@ -263,7 +378,7 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
         });
 
         it('ignores an unknown handle instead of throwing', async () => {
-            await expect(registry.awaitInput('sess_nope', Date.now() + 1_000)).resolves.toBeUndefined();
+            await expect(registry.awaitInput('missing-blue-fox', Date.now() + 1_000)).resolves.toBeUndefined();
         });
     });
 
@@ -313,7 +428,7 @@ describe.each(BACKENDS)('$name conformance', ({ build }) => {
         it('does not throw for a handle it cannot find', async () => {
             // The count of a handle that does not exist is not meaningful, and no caller reaches
             // this without resolving first; what matters is that it is not an error path.
-            await expect(registry.recordHandoff('sess_nope')).resolves.toEqual(expect.any(Number));
+            await expect(registry.recordHandoff('missing-blue-fox')).resolves.toEqual(expect.any(Number));
         });
     });
 

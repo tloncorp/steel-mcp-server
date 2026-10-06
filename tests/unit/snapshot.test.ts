@@ -646,6 +646,24 @@ describe('PageState.resolveRef', () => {
 });
 
 describe('PageState.capture — untrusted content handling', () => {
+    it('redacts vault-filled text even when the page labels it as an ordinary field', async () => {
+        const { session } = fixtureSession(
+            page([
+                {
+                    tag: 'INPUT',
+                    backendNodeId: 20,
+                    role: 'textbox',
+                    name: 'Account',
+                    attributes: { type: 'text', 'data-tlon-sensitive': 'true' },
+                    inputValue: 'private-account',
+                    bounds: [0, 0, 100, 20],
+                },
+            ])
+        );
+        const snapshot = await new PageState().capture(session, {});
+        expect(snapshot.nodes.find(node => node.name === 'Account')?.sensitive).toBe(true);
+        expect(JSON.stringify(snapshot)).not.toContain('private-account');
+    });
     it('redacts the value of a password input', async () => {
         const { session } = fixtureSession(
             page([

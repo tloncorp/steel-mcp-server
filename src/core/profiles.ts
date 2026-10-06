@@ -5,6 +5,7 @@ import type { ServerDeps, ToolHost } from './context.js';
 import { registerBatch } from './tools/batch.js';
 import { registerAct, registerFind, registerNavigate, registerSnapshot, registerWaitFor } from './tools/browse.js';
 import { registerSessionHandoff } from './tools/handoff.js';
+import { registerLogin } from './tools/login.js';
 import { registerSessionMonitor } from './tools/monitor.js';
 import { registerSessionReplay } from './tools/replay.js';
 import { registerRun } from './tools/run.js';
@@ -39,6 +40,7 @@ export const TOOL_TABLE: ToolDefinition[] = [
     { name: 'browser_pdf', profiles: SCRAPE_AND_UP, register: registerPdf },
     { name: 'browser_session_create', profiles: BROWSE_AND_UP, register: registerSessionCreate },
     { name: 'browser_session_release', profiles: BROWSE_AND_UP, register: registerSessionRelease },
+    { name: 'browser_login', profiles: BROWSE_AND_UP, register: registerLogin },
     { name: 'browser_navigate', profiles: BROWSE_AND_UP, register: registerNavigate },
     { name: 'browser_snapshot', profiles: BROWSE_AND_UP, register: registerSnapshot },
     { name: 'browser_find', profiles: BROWSE_AND_UP, register: registerFind },
@@ -50,8 +52,7 @@ export const TOOL_TABLE: ToolDefinition[] = [
     { name: 'browser_batch', profiles: BROWSE_AND_UP, register: registerBatch },
     { name: 'browser_run', profiles: BROWSE_AND_UP, register: registerRun },
     { name: 'browser_session_options', profiles: BROWSE_AND_UP, register: registerSessionOptions },
-    // Last on purpose. A host filters this one out of the list it shows the model, and appending
-    // rather than inserting keeps the prefix every other tool sits in byte-identical.
+    // App-only tools follow the model-facing tools to keep their shared prefix stable.
     { name: 'browser_session_live_view', profiles: BROWSE_AND_UP, register: registerSessionLiveView },
     { name: 'browser_session_monitor', profiles: BROWSE_AND_UP, register: registerSessionMonitor },
 ];

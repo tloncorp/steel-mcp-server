@@ -38,7 +38,7 @@ describe('the stdio binary', () => {
     it('serves tools/list over a real stdio connection', async () => {
         const { tools } = await client.listTools();
         expect(tools.map(tool => tool.name)).toContain('browser_scrape');
-        expect(tools).toHaveLength(17);
+        expect(tools).toHaveLength(18);
     });
 
     it('advertises the server instructions', () => {
@@ -57,7 +57,7 @@ describe('the stdio binary', () => {
     it('answers a stateful call with an unknown handle as a tool error, not a protocol error', async () => {
         const result = await client.callTool({
             name: 'browser_snapshot',
-            arguments: { session_id: 'sess_does_not_exist' },
+            arguments: { session_id: 'missing-blue-fox' },
         });
         expect((result as { isError?: boolean }).isError).toBe(true);
     });
@@ -74,7 +74,7 @@ describe('the stdio binary', () => {
         for (let call = 0; call < calls; call++) {
             const result = (await client.callTool({
                 name: 'browser_snapshot',
-                arguments: { session_id: 'sess_does_not_exist' },
+                arguments: { session_id: 'missing-blue-fox' },
             })) as { isError?: boolean; content?: Array<{ text?: string }> };
             const text = result.content?.map(block => block.text ?? '').join('\n') ?? '';
             expect(result.isError).toBe(true);

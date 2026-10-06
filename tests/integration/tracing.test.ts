@@ -156,7 +156,7 @@ describe('failed tool calls', () => {
     it('marks the span as failed with the error code, and still answers the caller', async () => {
         const result = await harness.client.callTool({
             name: 'browser_navigate',
-            arguments: { session_id: 'sess_nope', url: 'https://example.com' },
+            arguments: { session_id: 'missing-blue-fox', url: 'https://example.com' },
         });
 
         expect((result as { isError?: boolean }).isError).toBe(true);
@@ -168,7 +168,7 @@ describe('failed tool calls', () => {
     it('records no exception message, which can quote page content', async () => {
         await harness.client.callTool({
             name: 'browser_navigate',
-            arguments: { session_id: 'sess_nope', url: 'https://example.com' },
+            arguments: { session_id: 'missing-blue-fox', url: 'https://example.com' },
         });
 
         const span = harness.tracing.span('tools/call browser_navigate');
@@ -184,7 +184,7 @@ describe('span redaction', () => {
         await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
         await harness.client.callTool({
             name: 'browser_navigate',
-            arguments: { session_id: 'sess_nope', url: 'https://example.com' },
+            arguments: { session_id: 'missing-blue-fox', url: 'https://example.com' },
         });
 
         const recorded = JSON.stringify(

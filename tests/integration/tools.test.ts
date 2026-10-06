@@ -63,6 +63,34 @@ async function newSession(h: Harness = harness): Promise<string> {
     return structured.session_id;
 }
 
+describe('private saved-login tool', () => {
+    it('binds new sessions and returns only outcomes, with fixed errors on service failure', async () => {
+        const deps = testDeps();
+        const bindSession = vi.fn().mockResolvedValue(true);
+        const login = vi.fn().mockResolvedValue({ status: 'filled', submission_attempted: true });
+        deps.vault = { bindSession, login };
+        const h = await connect(deps);
+        try {
+            const session = await newSession(h);
+            expect(bindSession).toHaveBeenCalledOnce();
+            const result = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
+            expect(result.structuredContent).toMatchObject({
+                session_id: session,
+                login: { status: 'filled', submission_attempted: true },
+            });
+            login.mockRejectedValue(new Error('private-password private-owner-token'));
+            const failed = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
+            expect(failed.structuredContent).toMatchObject({ login: { status: 'unavailable' } });
+            expect(JSON.stringify(failed)).not.toMatch(/private-password|private-owner-token/);
+            const wrong = await h.client.callTool({ name: 'browser_login', arguments: { session_id: 'unknown' } });
+            expect(isError(wrong)).toBe(true);
+            expect(login).toHaveBeenCalledTimes(2);
+        } finally {
+            await h.close();
+        }
+    });
+});
+
 describe('tools/list', () => {
     it('exposes the browse profile in a stable, deterministic order', async () => {
         const first = await harness.client.listTools();
@@ -75,6 +103,7 @@ describe('tools/list', () => {
             'browser_pdf',
             'browser_session_create',
             'browser_session_release',
+            'browser_login',
             'browser_navigate',
             'browser_snapshot',
             'browser_find',
@@ -1237,9 +1266,9 @@ describe('browser_session_create', () => {
         expect(textOf(result)).toMatch(/do not guess another namespace.*session_options/i);
     });
 
-    it('returns an opaque handle that is not the Steel session id', async () => {
+    it('returns a readable handle independent of the Steel session id', async () => {
         const handle = await newSession();
-        expect(handle.startsWith('sess_')).toBe(true);
+        expect(handle).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
         expect(handle).not.toContain(harness.deps.api.created[0]!.sessionId);
     });
 
@@ -1339,7 +1368,7 @@ describe('stateful tools reject an unknown handle', () => {
         for (const call of calls) {
             const result = await harness.client.callTool({
                 name: call.name,
-                arguments: { session_id: 'sess_someoneelse', ...call.arguments },
+                arguments: { session_id: 'other-red-fox', ...call.arguments },
             });
             expect(isError(result), `${call.name} accepted an unknown handle`).toBe(true);
             expect(textOf(result)).toMatch(/no live browser session/i);
