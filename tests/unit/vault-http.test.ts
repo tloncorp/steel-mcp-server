@@ -103,7 +103,7 @@ describe('Pioneer vault protocol', () => {
         expect(options).toMatchObject({
             redirect: 'error',
             cache: 'no-store',
-            headers: { 'x-browser-vault-service': token },
+            headers: { authorization: `Basic ${token}` },
         });
         expect(JSON.parse(options!.body as string)).toEqual({
             ...identity,
@@ -150,5 +150,19 @@ describe('Pioneer vault protocol', () => {
         expect(() => loadVault({ BROWSER_VAULT_ENABLED: 'true' }, 'http://127.0.0.1:3000')).toThrow(
             'BROWSER_VAULT_KEY is required'
         );
+    });
+
+    it('uses the existing Pioneer token independently of the viewer service token', () => {
+        const env = {
+            BROWSER_VAULT_ENABLED: 'true',
+            BROWSER_VAULT_KEY: Buffer.alloc(32, 7).toString('base64'),
+            BROWSER_VAULT_KEY_ID: 'primary',
+            BROWSER_VAULT_SERVICE_TOKEN: token,
+            BROWSER_VAULT_PIONEER_ORIGIN: 'https://{planet}-feds.example',
+        };
+        expect(() => loadVault(env, 'http://127.0.0.1:3000')).toThrow('PIONEER_SIDECAR_TOKEN is required');
+        const loaded = loadVault({ ...env, PIONEER_SIDECAR_TOKEN: 'pioneer-existing-token' }, 'http://127.0.0.1:3000');
+        expect(loaded?.serviceToken).toBe(token);
+        expect(loaded?.create).toBeTypeOf('function');
     });
 });

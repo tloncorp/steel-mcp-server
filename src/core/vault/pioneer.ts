@@ -15,7 +15,7 @@ import {
 export class PioneerVaultStore implements VaultStore {
     constructor(
         private readonly originTemplate: string,
-        private readonly serviceToken: string,
+        private readonly pioneerToken: string,
         private readonly fetchImpl = fetch
     ) {
         if (originTemplate.split('{planet}').length !== 2)
@@ -28,11 +28,10 @@ export class PioneerVaultStore implements VaultStore {
             example.pathname !== '/' ||
             example.search ||
             example.hash ||
-            serviceToken.length < 32
+            !pioneerToken.trim() ||
+            /[\r\n]/.test(pioneerToken)
         ) {
-            throw new Error(
-                'The vault requires an HTTPS Pioneer origin template and a service token of at least 32 characters.'
-            );
+            throw new Error('The vault requires an HTTPS Pioneer origin template and a Pioneer sidecar token.');
         }
     }
 
@@ -49,7 +48,7 @@ export class PioneerVaultStore implements VaultStore {
             url,
             {
                 method: 'POST',
-                headers: { 'content-type': 'application/json', 'x-browser-vault-service': this.serviceToken },
+                headers: { 'content-type': 'application/json', authorization: `Basic ${this.pioneerToken}` },
                 body: JSON.stringify({ ...identity, proof, operation, ...payload }),
                 signal,
             },

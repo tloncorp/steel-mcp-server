@@ -277,10 +277,12 @@ called and the error text.
 
 Self-hosted operators enable private saved-login filling with `BROWSER_VAULT_ENABLED=true`.
 Configuration requires `BROWSER_VAULT_KEY` (base64, 32 random bytes), `BROWSER_VAULT_KEY_ID`,
-`BROWSER_VAULT_SERVICE_TOKEN` (at least 32 characters), and `BROWSER_VAULT_PIONEER_ORIGIN`
+`BROWSER_VAULT_SERVICE_TOKEN` (at least 32 characters), `PIONEER_SIDECAR_TOKEN`, and `BROWSER_VAULT_PIONEER_ORIGIN`
 (an HTTPS origin template containing `{planet}`). The encryption key is durable deployment
 state: back it up and keep it consistent across browser clusters in the same environment.
-Changing it requires an explicit re-encryption migration; moon-code and owner-token rotation do not.
+Changing the encryption key requires an explicit re-encryption migration; moon-code and owner-token rotation do not.
+Steel authenticates to Pioneer with its existing sidecar token using `Authorization: Basic`.
+The viewer service token protects only the private viewer-to-MCP API.
 
 The caller supplies `X-Tlon-Parent-Ship` and `X-Tlon-Ship` as routing hints. Pioneer verifies the
 moon's derived browser key before the session can use the vault. Ciphertext lives on the parent
