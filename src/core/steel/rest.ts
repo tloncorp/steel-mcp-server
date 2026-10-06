@@ -5,6 +5,7 @@ import type { SteelConfig } from '../config.js';
 import { mapSteelHttpError, type SteelErrorBody, type SteelOperation, SteelToolError } from '../errors.js';
 import { activeTraceparent, resolveTracer, withSteelCallSpan } from '../telemetry.js';
 import { stripInvisible } from '../untrusted.js';
+import { browserMonitorStatusSchema } from './monitor-status.js';
 import type {
     AccountDetails,
     AgentTraceTimeline,
@@ -339,6 +340,18 @@ export class SteelRestClient implements SteelApi {
             });
         }
         return { pageId, frameUrl, origin, kind, anchorBackendNodeId, expiresAt, submissionAttempted };
+    }
+
+    async getBrowserMonitorStatus(sessionId: string, signal?: AbortSignal) {
+        const raw = await this.requireJson<unknown>({
+            method: 'GET',
+            path: `/sessions/${encodeURIComponent(sessionId)}/monitor-status`,
+            operation: 'browser_tool',
+            signal,
+        });
+        const parsed = browserMonitorStatusSchema.safeParse(raw);
+        if (!parsed.success) throw new SteelToolError('Invalid browser monitor status.', { code: 'steel_error' });
+        return parsed.data;
     }
 
     async getSession(sessionId: string, signal?: AbortSignal): Promise<SteelSession> {

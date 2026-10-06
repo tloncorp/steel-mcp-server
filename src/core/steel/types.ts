@@ -262,6 +262,10 @@ export interface CredentialContinuation {
 }
 
 export interface SteelApi {
+    getBrowserMonitorStatus?(
+        sessionId: string,
+        signal?: AbortSignal
+    ): Promise<import('./monitor-status.js').BrowserMonitorStatus>;
     scrape(request: ScrapeRequest, signal?: AbortSignal): Promise<ScrapeResponse>;
     screenshot(request: ArtifactRequest, signal?: AbortSignal): Promise<ArtifactResponse>;
     pdf(request: ArtifactRequest, signal?: AbortSignal): Promise<ArtifactResponse>;
