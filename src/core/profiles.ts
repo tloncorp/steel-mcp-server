@@ -5,6 +5,7 @@ import type { ServerDeps, ToolHost } from './context.js';
 import { registerBatch } from './tools/batch.js';
 import { registerAct, registerFind, registerNavigate, registerSnapshot, registerWaitFor } from './tools/browse.js';
 import { registerSessionHandoff } from './tools/handoff.js';
+import { registerSessionMonitor } from './tools/monitor.js';
 import { registerSessionReplay } from './tools/replay.js';
 import { registerRun } from './tools/run.js';
 import {
@@ -52,6 +53,7 @@ export const TOOL_TABLE: ToolDefinition[] = [
     // Last on purpose. A host filters this one out of the list it shows the model, and appending
     // rather than inserting keeps the prefix every other tool sits in byte-identical.
     { name: 'browser_session_live_view', profiles: BROWSE_AND_UP, register: registerSessionLiveView },
+    { name: 'browser_session_monitor', profiles: BROWSE_AND_UP, register: registerSessionMonitor },
 ];
 
 /** The tools a profile exposes, in `tools/list` order. */
