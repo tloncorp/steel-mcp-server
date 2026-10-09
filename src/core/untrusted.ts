@@ -46,6 +46,26 @@ const SENSITIVE_NAME_HINT =
 const SENSITIVE_AUTOCOMPLETE_HINT =
     /^(?:username|current-password|new-password|one-time-code|cc-[a-z-]+|name|given-name|additional-name|family-name|organization|street-address|address-(?:line[123]|level[1234])|postal-code|country(?:-name)?|email|tel(?:-[a-z-]+)?)$/i;
 
+const SECURE_ENTRY_NAME_HINT =
+    /pass(word|phrase)?|secret|otp|totp|mfa|2fa|cvv|cvc|csc|ssn|token|api[-_]?key|user\s*name|\blogin\b|card|expir(?:y|ation)|verification\s*code|one[\s-]*time/i;
+const SECURE_ENTRY_AUTOCOMPLETE_HINT = /^(?:username|current-password|new-password|one-time-code|cc-[a-z-]+)$/i;
+
+/** Secrets require owner entry; ordinary contact details can be supplied by the caller. */
+export function requiresSecureEntry(field: SensitiveFieldDescriptor): boolean {
+    if (!['input', 'select', 'textarea'].includes(field.tagName.toLowerCase())) return false;
+    if (field.type?.toLowerCase() === 'password') return true;
+    if (field.tagName.toLowerCase() === 'input' && field.maxLength === '1') return true;
+    if ((field.autocomplete ?? '').split(/\s+/).some(token => SECURE_ENTRY_AUTOCOMPLETE_HINT.test(token))) return true;
+    return [field.name, field.id, field.label].some(value =>
+        SECURE_ENTRY_NAME_HINT.test(
+            (value ?? '')
+                .replace(/([a-z])([A-Z])/g, '$1 $2')
+                .replace(/[_-]/g, ' ')
+                .trim()
+        )
+    );
+}
+
 /** Provenance recorded on every fenced payload so the model can see where the text came from. */
 export interface Provenance {
     /** The URL after all redirects — never the URL that was requested. */

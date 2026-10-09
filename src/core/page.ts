@@ -298,7 +298,8 @@ export class BrowserPage {
                 objectId,
                 functionDeclaration: `function(receipt) {
                     return this.isConnected && this.ownerDocument.location.href === receipt.frameUrl &&
-                        this.ownerDocument.location.origin === receipt.origin && typeof this.value === 'string' && this.value.length > 0;
+                        this.ownerDocument.location.origin === receipt.origin &&
+                        (receipt.kind === 'details' || (typeof this.value === 'string' && this.value.length > 0));
                 }`,
                 arguments: [{ value: receipt }],
                 returnByValue: true,

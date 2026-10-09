@@ -6,6 +6,7 @@ import {
     fenceUntrusted,
     isSensitiveField,
     redactSensitiveValue,
+    requiresSecureEntry,
     stripHtmlComments,
     stripInvisible,
     UNTRUSTED_FENCE_CLOSE,
@@ -178,4 +179,31 @@ describe('defangMarkdownLinks', () => {
     it('leaves plain text untouched', () => {
         expect(defangMarkdownLinks('no links here')).toBe('no links here');
     });
+});
+
+describe('requiresSecureEntry', () => {
+    it.each(['shipping address-line1', 'name', 'email', 'tel', 'country', 'postal-code'])(
+        'permits caller-supplied ordinary details while retaining redaction: %s',
+        autocomplete => {
+            const field = { tagName: 'input', autocomplete };
+            expect(isSensitiveField(field)).toBe(true);
+            expect(requiresSecureEntry(field)).toBe(false);
+        }
+    );
+    it.each([
+        'username',
+        'current-password',
+        'new-password',
+        'one-time-code',
+        'section-payment billing cc-number',
+        'cc-csc',
+    ])('requires owner entry for %s', autocomplete => {
+        expect(requiresSecureEntry({ tagName: 'input', autocomplete })).toBe(true);
+    });
+    it.each(['Card number', 'CVV', 'Expiration date', 'Verification code', 'Username', 'Password'])(
+        'protects secret labels without autocomplete: %s',
+        label => {
+            expect(requiresSecureEntry({ tagName: 'input', label })).toBe(true);
+        }
+    );
 });
