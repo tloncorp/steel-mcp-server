@@ -57,6 +57,27 @@ function searchPage() {
 }
 
 describe('Jev browser runner', () => {
+    it('hands off an email-only login even when the caller supplies an email', async () => {
+        const deps = depsFor(() => {
+            const page = loginWallPage();
+            page.root.children!.splice(1, 1);
+            return page;
+        });
+        const { client } = await connect(deps);
+        const record = await session(deps);
+        deps.jevFetch = vi.fn<typeof fetch>();
+        const result = await client.callTool({
+            name: 'browser_run',
+            arguments: {
+                session_id: record.handle,
+                task: 'Sign in',
+                inputs: [{ field: 'Email', value: 'owner@example.test' }],
+            },
+        });
+        expect(result.structuredContent).toMatchObject({ status: 'needs_handoff', steps: [] });
+        expect(deps.jevFetch).not.toHaveBeenCalled();
+    });
+
     it('continues a securely filled login and never sends its secret to the decision model', async () => {
         const deps = depsFor(() => {
             const page = loginWallPage();

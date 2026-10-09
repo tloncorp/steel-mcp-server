@@ -4,7 +4,13 @@
 import safeRegex from 'safe-regex2';
 import { type StaleRefReason, SteelToolError, staleRefError } from './errors.js';
 import type { CdpSession } from './steel/cdp.js';
-import { defangMarkdownLinks, isSensitiveField, redactSensitiveValue, stripInvisible } from './untrusted.js';
+import {
+    defangMarkdownLinks,
+    isSensitiveField,
+    redactSensitiveValue,
+    requiresSecureEntry,
+    stripInvisible,
+} from './untrusted.js';
 
 /** The computed styles the pipeline needs to decide whether a node can be targeted. */
 export const COMPUTED_STYLES = [
@@ -41,6 +47,8 @@ export interface SnapshotNode {
     interactive: boolean;
     /** True for a form control whose value must never be echoed back, such as a password input. */
     sensitive: boolean;
+    /** True when the owner must enter this field through a secure handoff. */
+    requiresSecureEntry: boolean;
     properties?: Record<string, string | number | boolean> | undefined;
     /** Element centre in CSS pixels, used to dispatch pointer events. */
     center?: { x: number; y: number } | undefined;
@@ -686,7 +694,12 @@ export class PageState {
             const passwordForms = new Set(
                 [...document.facts]
                     .filter(
-                        ([, facts]) => facts.tagName === 'INPUT' && facts.attributes.type?.toLowerCase() === 'password'
+                        ([, facts]) =>
+                            facts.tagName === 'INPUT' &&
+                            facts.attributes.type?.toLowerCase() === 'password' &&
+                            !/cc-|cvv|cvc|csc|card/i.test(
+                                [facts.attributes.autocomplete, facts.attributes.name, facts.attributes.id].join(' ')
+                            )
                     )
                     .map(([id]) => formOf(id))
             );
@@ -857,6 +870,19 @@ export class PageState {
 
             const value =
                 rawValue === undefined ? undefined : sensitive ? redactSensitiveValue(rawValue) : cleanText(rawValue);
+            const secureEntry =
+                nodeFacts === undefined
+                    ? rawValue !== undefined
+                    : credentialNeighbours.has(backendNodeId ?? -1) ||
+                      requiresSecureEntry({
+                          tagName: nodeFacts.tagName,
+                          type: nodeFacts.attributes.type,
+                          name: nodeFacts.attributes.name,
+                          id: nodeFacts.attributes.id,
+                          autocomplete: nodeFacts.attributes.autocomplete,
+                          label: name,
+                          maxLength: nodeFacts.attributes.maxlength,
+                      });
 
             const properties: Record<string, string | number | boolean> = {};
             for (const property of axNode.properties ?? []) {
@@ -898,6 +924,7 @@ export class PageState {
                     inViewport,
                     interactive: ref !== undefined,
                     sensitive,
+                    requiresSecureEntry: secureEntry,
                     properties: Object.keys(properties).length > 0 ? properties : undefined,
                     center,
                 });
