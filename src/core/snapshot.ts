@@ -82,6 +82,7 @@ export interface ResolvedRef {
     role: string;
     name: string;
     snapshotId: string;
+    formControl?: import('./steel/selected-form.js').SelectedFormControl | undefined;
     center?: { x: number; y: number } | undefined;
 }
 
@@ -666,6 +667,7 @@ export class PageState {
         // A username beside a password can have no name/autocomplete at all.
         // Protect text controls in the same form, including form= associations.
         const credentialNeighbours = new Set<number>();
+        const formOwners = new Map<number, number | undefined>();
         for (const document of documents) {
             const formsById = new Map(
                 [...document.facts]
@@ -691,6 +693,7 @@ export class PageState {
                     .map(([id]) => formOf(id))
             );
             for (const [id, facts] of document.facts) {
+                if (['INPUT', 'TEXTAREA', 'SELECT'].includes(facts.tagName)) formOwners.set(id, formOf(id));
                 if (
                     facts.tagName === 'INPUT' &&
                     ['', 'text', 'email', 'tel'].includes(facts.attributes.type?.toLowerCase() ?? '') &&
@@ -835,6 +838,27 @@ export class PageState {
                     snapshotId,
                     lastSeenSnapshotId: snapshotId,
                     center,
+                    formControl:
+                        nodeFacts && ['INPUT', 'TEXTAREA', 'SELECT'].includes(nodeFacts.tagName) && frameLoaderId
+                            ? {
+                                  backendNodeId,
+                                  frameId,
+                                  loaderId: frameLoaderId,
+                                  tagName: nodeFacts.tagName as 'INPUT' | 'TEXTAREA' | 'SELECT',
+                                  type:
+                                      nodeFacts.tagName === 'SELECT'
+                                          ? 'multiple' in nodeFacts.attributes
+                                              ? 'select-multiple'
+                                              : 'select-one'
+                                          : nodeFacts.tagName === 'TEXTAREA'
+                                            ? 'textarea'
+                                            : nodeFacts.attributes.type?.toLowerCase() || 'text',
+                                  name: nodeFacts.attributes.name || '',
+                                  id: nodeFacts.attributes.id || '',
+                                  label: accessibleName,
+                                  formBackendNodeId: formOwners.get(backendNodeId),
+                              }
+                            : undefined,
                 });
             }
 
@@ -844,7 +868,8 @@ export class PageState {
             const sensitive =
                 nodeFacts === undefined
                     ? rawValue !== undefined
-                    : credentialNeighbours.has(backendNodeId ?? -1) ||
+                    : nodeFacts.attributes['data-steel-private'] === 'true' ||
+                      credentialNeighbours.has(backendNodeId ?? -1) ||
                       isSensitiveField({
                           tagName: nodeFacts.tagName,
                           type: nodeFacts.attributes.type,
@@ -861,6 +886,7 @@ export class PageState {
             const properties: Record<string, string | number | boolean> = {};
             for (const property of axNode.properties ?? []) {
                 if (!USEFUL_PROPERTIES.has(property.name)) continue;
+                if (sensitive && ['checked', 'selected'].includes(property.name)) continue;
                 const propertyValue = property.value?.value;
                 if (propertyValue === undefined || propertyValue === false || propertyValue === 'false') continue;
                 properties[property.name] = propertyValue as string | number | boolean;
@@ -965,6 +991,42 @@ export class PageState {
             });
         }
         return record;
+    }
+
+    /** Names select a unique control from the observed snapshot, never an unobserved page search. */
+    selectFormFields(
+        selectors: import('./steel/selected-form.js').FormFieldSelector[]
+    ): import('./steel/selected-form.js').SelectedFormControl[] {
+        const fields = selectors.map(selector => {
+            let ref: string;
+            if (typeof selector === 'string') ref = selector;
+            else {
+                const matches =
+                    this.latest?.nodes.filter(node => {
+                        const field = node.ref && this.recordByRef.get(node.ref)?.formControl;
+                        return (
+                            field &&
+                            ('name' in selector ? field.name === selector.name : field.label === selector.label)
+                        );
+                    }) || [];
+                if (matches.length !== 1 || !matches[0]?.ref)
+                    throw new SteelToolError(
+                        'The field name or label does not identify one visible control. Take a fresh snapshot and use its @eN reference.',
+                        { code: 'invalid_argument' }
+                    );
+                ref = matches[0].ref;
+            }
+            const field = this.resolveRef(ref).formControl;
+            if (!field)
+                throw new SteelToolError(
+                    'The selected reference is not a supported form control. Take a fresh snapshot.',
+                    { code: 'invalid_argument' }
+                );
+            return field;
+        });
+        if (new Set(fields.map(field => `${field.frameId}:${field.backendNodeId}`)).size !== fields.length)
+            throw new SteelToolError('Select each form control only once.', { code: 'invalid_argument' });
+        return fields;
     }
 
     /**

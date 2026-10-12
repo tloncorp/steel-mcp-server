@@ -62,6 +62,17 @@ export const FAKE_VIEWPORT = { width: 1280, height: 720 };
 
 /** Records every call so tests can assert on the wire shape without a network. */
 export class FakeSteelApi implements SteelApi {
+    readonly preparedForms: Array<{
+        sessionId: string;
+        request: import('../../src/core/steel/selected-form.js').SelectedFormRequest;
+    }> = [];
+    async prepareFormHandoff(
+        sessionId: string,
+        request: import('../../src/core/steel/selected-form.js').SelectedFormRequest
+    ) {
+        this.preparedForms.push({ sessionId, request });
+        return { viewer_url: 'https://viewer.test/s/private-form.signature', expires_at: Date.now() + 300_000 };
+    }
     async getCredentialContinuation(): Promise<CredentialContinuation | null> {
         return this.options.continuation ?? null;
     }

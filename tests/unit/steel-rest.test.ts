@@ -102,6 +102,40 @@ describe('SteelRestClient.scrape', () => {
     });
 });
 
+describe('SteelRestClient.prepareFormHandoff', () => {
+    it('sends only recorded field identities and returns the private capability', async () => {
+        const handoff = { viewer_url: 'https://viewer.test/s/form.signature', expires_at: 123456 };
+        const { api, calls } = client([{ body: handoff }]);
+        const selection = {
+            pageId: 'page-1',
+            fields: [
+                {
+                    backendNodeId: 10,
+                    frameId: 'frame-1',
+                    loaderId: 'loader-1',
+                    tagName: 'INPUT' as const,
+                    type: 'text',
+                    name: 'member',
+                    id: '',
+                    label: 'Member',
+                },
+            ],
+        };
+        expect(await api.prepareFormHandoff('session', selection)).toEqual(handoff);
+        expect(calls[0]).toMatchObject({
+            method: 'POST',
+            url: 'https://api.steel.dev/v1/sessions/session/credential-handoff',
+            body: selection,
+        });
+    });
+    it('rejects a response without a handoff capability', async () => {
+        const { api } = client([{ body: {} }]);
+        await expect(api.prepareFormHandoff('session', { pageId: 'page', fields: [] })).rejects.toThrow(
+            'invalid form handoff'
+        );
+    });
+});
+
 describe('SteelRestClient artifact endpoints', () => {
     it('returns the hosted URL for a screenshot rather than bytes', async () => {
         const { api } = client([{ body: { url: 'https://files.steel.dev/v1/static/abc.png' } }]);

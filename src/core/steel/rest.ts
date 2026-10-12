@@ -342,6 +342,23 @@ export class SteelRestClient implements SteelApi {
         return { pageId, frameUrl, origin, kind, anchorBackendNodeId, expiresAt, submissionAttempted };
     }
 
+    async prepareFormHandoff(
+        sessionId: string,
+        request: import('./selected-form.js').SelectedFormRequest,
+        signal?: AbortSignal
+    ) {
+        const result = await this.requireJson<import('./selected-form.js').PreparedFormHandoff>({
+            method: 'POST',
+            path: `/sessions/${encodeURIComponent(sessionId)}/credential-handoff`,
+            operation: 'browser_tool',
+            signal,
+            body: { ...request },
+        });
+        if (typeof result.viewer_url !== 'string' || !Number.isFinite(result.expires_at))
+            throw new SteelToolError('The browser returned an invalid form handoff.', { code: 'steel_error' });
+        return result;
+    }
+
     async getBrowserMonitorStatus(sessionId: string, signal?: AbortSignal) {
         const raw = await this.requireJson<unknown>({
             method: 'GET',
