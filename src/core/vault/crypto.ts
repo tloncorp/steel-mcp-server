@@ -55,12 +55,18 @@ export class VaultCipher {
                 record.label,
                 record.factor,
                 record.createdAt,
+                ...(record.username === undefined ? [] : [record.username]),
             ])
         );
     }
 
-    encrypt(metadata: Omit<LoginMetadata, 'version' | 'keyId'>, secret: LoginSecret): EncryptedLogin {
-        const record: LoginMetadata = { ...metadata, version: 2, keyId: this.keyId };
+    encrypt(metadata: Omit<LoginMetadata, 'version' | 'keyId' | 'username'>, secret: LoginSecret): EncryptedLogin {
+        const record: LoginMetadata = {
+            ...metadata,
+            ...(secret.username ? { username: secret.username } : {}),
+            version: 2,
+            keyId: this.keyId,
+        };
         const nonce = randomBytes(12);
         const key = this.key(record);
         const plaintext = Buffer.from(JSON.stringify(loginSecretSchema.parse(secret)));

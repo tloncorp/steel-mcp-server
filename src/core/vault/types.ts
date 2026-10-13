@@ -42,6 +42,7 @@ export const encryptedLoginSchema = identitySchema
         updatedAt: z.number().int().nonnegative(),
         keyId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
         label: z.string().min(1).max(256),
+        username: z.string().min(1).max(4096).optional(),
         permission: z.enum(['ask', 'allow']),
         factor: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
         nonce: z.string().regex(/^[A-Za-z0-9+/]{16}$/),
@@ -64,7 +65,10 @@ export const loginSecretSchema = z
     })
     .strict();
 export type LoginSecret = z.infer<typeof loginSecretSchema>;
-export type LoginSummary = Pick<EncryptedLogin, 'id' | 'origin' | 'revision' | 'updatedAt' | 'label' | 'permission'>;
+export type LoginSummary = Pick<
+    EncryptedLogin,
+    'id' | 'origin' | 'revision' | 'updatedAt' | 'label' | 'username' | 'permission'
+>;
 
 export type VaultProof = { kind: 'browser'; key: string } | { kind: 'owner'; token: string };
 export interface VaultStore {

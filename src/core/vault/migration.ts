@@ -13,7 +13,7 @@ import {
 } from './types.js';
 
 const legacySchema = encryptedLoginSchema
-    .omit({ label: true, permission: true, factor: true })
+    .omit({ label: true, username: true, permission: true, factor: true })
     .extend({ version: z.literal(1) })
     .strict();
 

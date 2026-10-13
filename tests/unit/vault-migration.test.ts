@@ -7,7 +7,7 @@ import { loginMigration } from '../../src/core/vault/migration.js';
 
 const identity = { planet: 'sampel-palnet', moon: 'pinser-botter-sampel-palnet' };
 const root = Buffer.alloc(32, 7).toString('base64');
-const secret = { label: 'Personal', password: 'saved-password' };
+const secret = { label: 'Personal', username: 'me@example.com', password: 'saved-password' };
 function stored() {
     const record = {
         ...identity,
@@ -60,7 +60,14 @@ it('preserves the password and defaults migrated automatic reuse to ask', async 
     const record = await loginMigration(root, cipher)(identity, value, async () =>
         Buffer.alloc(32, 9).toString('base64')
     );
-    expect(record).toMatchObject({ ...identity, id: value.id, revision: 5, permission: 'ask', label: secret.label });
+    expect(record).toMatchObject({
+        ...identity,
+        id: value.id,
+        revision: 5,
+        permission: 'ask',
+        label: secret.label,
+        username: secret.username,
+    });
     expect(cipher.decrypt(identity, record)).toEqual(secret);
     expect(value.version).toBe(1);
     await expect(

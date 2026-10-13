@@ -83,12 +83,13 @@ function safeEqual(left: string, right: string): boolean {
 }
 
 function summaries(records: EncryptedLogin[]): LoginSummary[] {
-    return records.map(({ id, origin, revision, updatedAt, label, permission }) => ({
+    return records.map(({ id, origin, revision, updatedAt, label, username, permission }) => ({
         id,
         origin,
         revision,
         updatedAt,
         label,
+        ...(username ? { username } : {}),
         permission,
     }));
 }

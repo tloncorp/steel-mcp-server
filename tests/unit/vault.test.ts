@@ -12,7 +12,7 @@ describe('vault cipher', () => {
         const record = f.seed();
         expect(f.cipher.decrypt(alice, record)).toEqual(secret);
         expect(JSON.stringify(record)).not.toContain(secret.password);
-        expect(JSON.stringify(record)).not.toContain(secret.username);
+        expect(record).toHaveProperty('username', secret.username);
         expect(f.seed().nonce).not.toBe(record.nonce);
         for (const mutation of [
             { planet: other.planet },
@@ -21,6 +21,8 @@ describe('vault cipher', () => {
             { origin: 'https://elsewhere.example' },
             { createdAt: 1 },
             { label: 'Other' },
+            { username: 'other@example.com' },
+            { username: undefined },
             { factor: Buffer.alloc(32, 10).toString('base64') },
             { keyId: 'different' },
             { tag: Buffer.alloc(16).toString('base64') },
@@ -58,6 +60,7 @@ describe('planet-backed browser vault', () => {
                 revision: saved.revision,
                 updatedAt: saved.updatedAt,
                 label: 'Personal',
+                username: secret.username,
                 permission: 'ask',
             },
         ]);

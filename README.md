@@ -287,7 +287,7 @@ The viewer service token protects only the private viewer-to-MCP API.
 
 The caller supplies `X-Tlon-Parent-Ship` and `X-Tlon-Ship` as routing hints. Pioneer verifies the
 moon's derived browser key before the session can use saved credentials. The parent planet stores
-ciphertext, exact HTTPS origin, account label, bot-moon scope, and an `ask` or `allow` policy. The
+ciphertext, exact HTTPS origin, account label, optional username, bot-moon scope, and an `ask` or `allow` policy. The
 model can list that metadata; only an `allow` record can be filled automatically. An `ask` record
 requires an owner-authenticated secure form. A chat reply or A2UI continuation is not authorization.
 The owner can fill once, grant automatic use, revoke it, or delete the credential in Bot settings.
