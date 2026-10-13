@@ -369,6 +369,19 @@ export class BrowserPage {
     }
 
     async navigate(url: string): Promise<NavigateOutcome> {
+        let destination: URL;
+        try {
+            destination = new URL(url);
+        } catch {
+            throw new SteelToolError('Browser navigation requires an absolute HTTP or HTTPS URL.', {
+                code: 'invalid_argument',
+            });
+        }
+        if (destination.protocol !== 'http:' && destination.protocol !== 'https:') {
+            throw new SteelToolError('Browser navigation requires an absolute HTTP or HTTPS URL.', {
+                code: 'invalid_argument',
+            });
+        }
         const beforeLoader = (await this.currentFrame()).loaderId;
         const baseline = await this.beginChange();
         try {
