@@ -295,7 +295,7 @@ The owner can fill once, grant automatic use, revoke it, or delete the credentia
 AES-256-GCM keys use HKDF-SHA256 over the static server key and a domain-separated SHA-256
 derivative of the planet's code. Each record retains its encryption factor so code changes do not
 invalidate saved passwords. The factor alone cannot decrypt anything. Owner proofs use a separate
-hash domain and are verified against the current planet code. Both values travel only through
+HMAC domain, expire after ten minutes, and are verified against the current planet code and server time. Both values travel only through
 private service requests; neither is returned by MCP or the Solaris metadata API.
 
 The model-facing `browser_login` tool fills through the private browser API and returns an outcome.
