@@ -1,4 +1,5 @@
 // ABOUTME: The only vault storage connection: verified identities and ciphertext go directly to Pioneer.
+// ABOUTME: Owner-authenticated changes use revision checks and private sidecar requests.
 import { z } from 'zod';
 import { privateJson } from './transport.js';
 import {
@@ -16,7 +17,12 @@ export class PioneerVaultStore implements VaultStore {
     constructor(
         private readonly originTemplate: string,
         private readonly pioneerToken: string,
-        private readonly fetchImpl = fetch
+        private readonly fetchImpl = fetch,
+        private readonly migrate?: (
+            identity: VaultIdentity,
+            value: unknown,
+            factor: () => Promise<string>
+        ) => Promise<EncryptedLogin>
     ) {
         if (originTemplate.split('{planet}').length !== 2)
             throw new Error('BROWSER_VAULT_PIONEER_ORIGIN must contain {planet} once.');
@@ -56,6 +62,27 @@ export class PioneerVaultStore implements VaultStore {
         );
     }
 
+    async factor(identity: VaultIdentity, proof: VaultProof, signal?: AbortSignal): Promise<string> {
+        const result = z
+            .object({ factor: z.string().regex(/^[A-Za-z0-9+/]{43}=$/) })
+            .safeParse(await this.request(identity, proof, 'factor', {}, signal));
+        if (!result.success) throw new VaultError(503, 'The ship encryption factor is unavailable.');
+        return result.data.factor;
+    }
+
+    async permission(
+        identity: VaultIdentity,
+        proof: VaultProof,
+        id: string,
+        expectedRevision: number,
+        permission: 'ask' | 'allow',
+        signal?: AbortSignal
+    ): Promise<void> {
+        const result = await this.request(identity, proof, 'permission', { id, expectedRevision, permission }, signal);
+        if (!z.object({ ok: z.literal(true) }).safeParse(result).success)
+            throw new VaultError(503, 'The credential permission was not acknowledged.');
+    }
+
     async verify(identity: VaultIdentity, proof: VaultProof, signal?: AbortSignal): Promise<void> {
         const actual = identitySchema.safeParse(await this.request(identity, proof, 'verify', {}, signal));
         if (!actual.success || !sameIdentity(actual.data, identity))
@@ -64,11 +91,24 @@ export class PioneerVaultStore implements VaultStore {
 
     async list(identity: VaultIdentity, proof: VaultProof, signal?: AbortSignal): Promise<EncryptedLogin[]> {
         const result = z
-            .object({ records: z.array(encryptedLoginSchema).max(200) })
+            .object({ records: z.array(z.unknown()).max(200) })
             .safeParse(await this.request(identity, proof, 'list', {}, signal));
-        if (!result.success || result.data.records.some(record => !sameIdentity(record, identity)))
-            throw new VaultError(503, 'The credential store returned invalid records.');
-        return result.data.records;
+        if (!result.success) throw new VaultError(503, 'The credential store returned invalid records.');
+        const records: EncryptedLogin[] = [];
+        for (const value of result.data.records) {
+            const parsed = encryptedLoginSchema.safeParse(value);
+            if (parsed.success && sameIdentity(parsed.data, identity)) {
+                records.push(parsed.data);
+            } else {
+                if (!this.migrate) throw new VaultError(503, 'The credential store returned invalid records.');
+                if (proof.kind !== 'owner')
+                    throw new VaultError(503, 'Open saved logins as the owner to update this credential.');
+                const migrated = await this.migrate(identity, value, () => this.factor(identity, proof, signal));
+                await this.put(identity, proof, migrated, migrated.revision - 1, signal);
+                records.push(migrated);
+            }
+        }
+        return records;
     }
 
     async put(

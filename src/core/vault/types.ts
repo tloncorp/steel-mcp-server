@@ -1,4 +1,5 @@
 // ABOUTME: The vault's encrypted records and private service protocol. No type here is a secret-return MCP tool.
+// ABOUTME: Strict schemas keep encrypted records separate from public account metadata.
 import { z } from 'zod';
 
 export class VaultError extends Error {
@@ -33,13 +34,16 @@ export const originSchema = z
 
 export const encryptedLoginSchema = identitySchema
     .extend({
-        version: z.literal(1),
+        version: z.literal(2),
         id: z.uuid(),
         origin: originSchema,
         revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
         createdAt: z.number().int().nonnegative(),
         updatedAt: z.number().int().nonnegative(),
         keyId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
+        label: z.string().min(1).max(256),
+        permission: z.enum(['ask', 'allow']),
+        factor: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
         nonce: z.string().regex(/^[A-Za-z0-9+/]{16}$/),
         tag: z.string().regex(/^[A-Za-z0-9+/]{22}==$/),
         ciphertext: z
@@ -60,13 +64,19 @@ export const loginSecretSchema = z
     })
     .strict();
 export type LoginSecret = z.infer<typeof loginSecretSchema>;
-export type LoginSummary = Pick<EncryptedLogin, 'id' | 'origin' | 'revision' | 'updatedAt'> & {
-    label: string;
-    username?: string;
-};
+export type LoginSummary = Pick<EncryptedLogin, 'id' | 'origin' | 'revision' | 'updatedAt' | 'label' | 'permission'>;
 
 export type VaultProof = { kind: 'browser'; key: string } | { kind: 'owner'; token: string };
 export interface VaultStore {
+    factor(identity: VaultIdentity, proof: VaultProof, signal?: AbortSignal): Promise<string>;
+    permission(
+        identity: VaultIdentity,
+        proof: VaultProof,
+        id: string,
+        revision: number,
+        permission: 'ask' | 'allow',
+        signal?: AbortSignal
+    ): Promise<void>;
     verify(identity: VaultIdentity, proof: VaultProof, signal?: AbortSignal): Promise<void>;
     list(identity: VaultIdentity, proof: VaultProof, signal?: AbortSignal): Promise<EncryptedLogin[]>;
     put(
@@ -140,6 +150,6 @@ export function formTarget(form: SecureForm): FormTarget {
 }
 
 export type LoginOutcome = {
-    status: 'no_match' | 'choice_required' | 'filled' | 'needs_input' | 'unavailable';
+    status: 'no_match' | 'approval_required' | 'choice_required' | 'filled' | 'needs_input' | 'unavailable';
     submission_attempted?: boolean;
 };

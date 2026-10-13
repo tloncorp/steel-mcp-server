@@ -68,7 +68,14 @@ describe('private saved-login tool', () => {
         const deps = testDeps();
         const bindSession = vi.fn().mockResolvedValue(true);
         const login = vi.fn().mockResolvedValue({ status: 'filled', submission_attempted: true });
-        deps.vault = { bindSession, login };
+        deps.vault = {
+            assertSession: vi.fn().mockResolvedValue(undefined),
+            bindSession,
+            login,
+            hasProtectedValues: () => false,
+            redact: result => result,
+            discover: vi.fn().mockResolvedValue([]),
+        };
         const h = await connect(deps);
         try {
             const session = await newSession(h);
@@ -78,6 +85,14 @@ describe('private saved-login tool', () => {
                 session_id: session,
                 login: { status: 'filled', submission_attempted: true },
             });
+            for (const name of ['browser_session_live_view', 'browser_screenshot', 'browser_pdf']) {
+                const denied = await h.client.callTool({
+                    name,
+                    arguments: name === 'browser_pdf' ? { url: 'https://example.com' } : { session_id: session },
+                });
+                expect(isError(denied)).toBe(true);
+                expect(JSON.stringify(denied)).toContain('protected credentials');
+            }
             login.mockRejectedValue(new Error('private-password private-owner-token'));
             const failed = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
             expect(failed.structuredContent).toMatchObject({ login: { status: 'unavailable' } });

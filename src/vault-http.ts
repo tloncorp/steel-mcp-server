@@ -1,4 +1,5 @@
 // ABOUTME: Private viewer-to-vault HTTP surface. Browser tools cannot invoke owner or secret-bearing operations.
+// ABOUTME: Service authentication protects owner actions and bound credential handoffs.
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -69,6 +70,15 @@ export function createVaultHttp(
                     );
                     break;
                 }
+                case '/internal/vault/authorize-viewer': {
+                    const args = z
+                        .object({ sessionId: z.uuid(), planet: shipSchema, ownerToken: ownerTokenSchema })
+                        .strict()
+                        .parse(body);
+                    await vault.authorizeViewer(args.sessionId, args.planet, args.ownerToken, signal);
+                    answer(response, 200, { ok: true });
+                    break;
+                }
                 case '/internal/vault/authorize': {
                     const args = authorizeSchema.parse(body);
                     answer(response, 200, await vault.authorize(args.handoffId, args.planet, args.ownerToken, signal));
@@ -94,6 +104,21 @@ export function createVaultHttp(
                     answer(response, 200, {
                         accounts: await vault.list({ planet: args.planet, moon: args.moon }, args.ownerToken, signal),
                     });
+                    break;
+                }
+                case '/internal/vault/permission': {
+                    const args = ownerSchema
+                        .extend({ record: recordChoiceSchema, permission: z.enum(['ask', 'allow']) })
+                        .strict()
+                        .parse(body);
+                    await vault.setPermission(
+                        { planet: args.planet, moon: args.moon },
+                        args.ownerToken,
+                        args.record,
+                        args.permission,
+                        signal
+                    );
+                    answer(response, 200, { ok: true });
                     break;
                 }
                 case '/internal/vault/delete': {

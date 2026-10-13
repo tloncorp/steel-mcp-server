@@ -177,6 +177,9 @@ export class HostedRuntime {
         return {
             vault: this.vault
                 ? {
+                      hasProtectedValues: () => this.vault!.hasProtectedValues(input.principal),
+                      assertSession: record => this.vault!.assertSession(record),
+                      redact: result => this.vault!.redact(input.principal, result),
                       bindSession: async (record, signal) => {
                           try {
                               return await this.vault!.bindSession(
@@ -192,7 +195,8 @@ export class HostedRuntime {
                               return false;
                           }
                       },
-                      login: (record, signal) => this.vault!.login(record, signal),
+                      login: (record, signal, choice) => this.vault!.login(record, signal, choice),
+                      discover: (record, signal) => this.vault!.discover(record, signal),
                   }
                 : undefined,
             config: tenant.config,

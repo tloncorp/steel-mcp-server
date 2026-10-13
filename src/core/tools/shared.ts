@@ -4,7 +4,7 @@ import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelc
 import { z } from 'zod';
 import type { ServerDeps } from '../context.js';
 import { type EnvelopeSections, successResult } from '../envelope.js';
-import { toolErrorResult } from '../errors.js';
+import { SteelToolError, toolErrorResult } from '../errors.js';
 import type { BrowserPage } from '../page.js';
 import { DEFAULT_MAX_TOKENS, paginate } from '../pagination.js';
 import type { HandleRecord } from '../registry.js';
@@ -58,9 +58,26 @@ export async function guard(
     let finish: (() => void) | undefined;
     try {
         finish = deps.beginTool?.();
-        return await work();
+        if (
+            deps.vault &&
+            [
+                'browser_session_live_view',
+                'browser_session_diagnostics',
+                'browser_session_replay',
+                'browser_screenshot',
+                'browser_pdf',
+            ].includes(_toolName)
+        ) {
+            throw new SteelToolError(
+                'This browser contains protected credentials. Use text inspection or the owner viewer.',
+                { code: 'invalid_argument' }
+            );
+        }
+        const outcome = await work();
+        return deps.vault ? deps.vault.redact(outcome) : outcome;
     } catch (error) {
-        return toolErrorResult(error);
+        const outcome = toolErrorResult(error);
+        return deps.vault ? deps.vault.redact(outcome) : outcome;
     } finally {
         finish?.();
     }
@@ -82,16 +99,26 @@ export async function withPage(
 ): Promise<ToolOutcome> {
     return guard(deps, toolName, request, async () => {
         const record = await deps.registry.resolveForAgent(sessionId, deps.principal);
+        await deps.vault?.assertSession(record);
         await deps.registry.touch(sessionId);
         const page = await deps.pool.page(record.steelSessionId, request.signal);
         const initial = page.pageState.lastSnapshot;
-        recordBrowserUrl('initial', initial?.url, deps.config.traceUrlPaths);
+        recordBrowserUrl(
+            'initial',
+            deps.vault ? deps.vault.redact(initial?.url) : initial?.url,
+            deps.config.traceUrlPaths
+        );
         try {
             return await work(page, record);
         } finally {
             // A cached pre-action snapshot is not evidence of the final destination.
             const final = page.pageState.lastSnapshot;
-            if (final && final !== initial) recordBrowserUrl('final', final.url, deps.config.traceUrlPaths);
+            if (final && final !== initial)
+                recordBrowserUrl(
+                    'final',
+                    deps.vault ? deps.vault.redact(final.url) : final.url,
+                    deps.config.traceUrlPaths
+                );
         }
     });
 }

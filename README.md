@@ -286,11 +286,28 @@ Steel authenticates to Pioneer with its existing sidecar token using `Authorizat
 The viewer service token protects only the private viewer-to-MCP API.
 
 The caller supplies `X-Tlon-Parent-Ship` and `X-Tlon-Ship` as routing hints. Pioneer verifies the
-moon's derived browser key before the session can use the vault. Ciphertext lives on the parent
-planet, partitioned by bot moon and exact HTTPS origin. Native owner authorization is required
-for saving, account selection, listing, and deletion. The model-facing `browser_login` tool
-returns status only and fills through the private browser API. It makes at most one automatic
-attempt per account revision and form step; a filled result is not proof of sign-in.
+moon's derived browser key before the session can use saved credentials. The parent planet stores
+ciphertext, exact HTTPS origin, account label, bot-moon scope, and an `ask` or `allow` policy. The
+model can list that metadata; only an `allow` record can be filled automatically. An `ask` record
+requires an owner-authenticated secure form. A chat reply or A2UI continuation is not authorization.
+The owner can fill once, grant automatic use, revoke it, or delete the credential in Bot settings.
+
+AES-256-GCM keys use HKDF-SHA256 over the static server key and a domain-separated SHA-256
+derivative of the planet's code. Each record retains its encryption factor so code changes do not
+invalidate saved passwords. The factor alone cannot decrypt anything. Owner proofs use a separate
+hash domain and are verified against the current planet code. Both values travel only through
+private service requests; neither is returned by MCP or the Solaris metadata API.
+
+The model-facing `browser_login` tool fills through the private browser API and returns an outcome.
+It makes at most one automatic attempt per account revision and form step; filling is not proof of
+sign-in. Known filled values are redacted from tool results and automation-model input. Raw CDP,
+screenshots, and PDFs are unavailable through MCP when the vault is enabled. The live viewer
+requires a separate owner proof. A restarted MCP process rejects unrecovered browser handles;
+open a fresh session to restore the credential protection context.
+
+The destination site necessarily receives the password. Redaction covers direct values and common
+encodings, not arbitrary transformations by a hostile site; exact-origin checks and the private
+browser control plane remain essential. Keep the browser isolated from internal control services.
 
 The viewer connects to the service-token-protected `/internal/vault/` endpoints. Keep this
 surface and the browser REST API private. Both services are disabled by default, and configuration

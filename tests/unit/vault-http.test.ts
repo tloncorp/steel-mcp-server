@@ -1,4 +1,5 @@
 // ABOUTME: The owner HTTP surface is service-authenticated, bounded, and secret-safe on errors.
+// ABOUTME: Invalid proofs, records, and remote failures never expose private response data.
 import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadVault } from '../../src/core/vault/config.js';
@@ -128,6 +129,9 @@ describe('Pioneer vault protocol', () => {
                 revision: 1,
                 createdAt: 1,
                 updatedAt: 1,
+                label: 'Personal',
+                permission: 'ask',
+                factor: Buffer.alloc(32, 9).toString('base64'),
             },
             { password: 'fixture-password', label: 'Personal' }
         );

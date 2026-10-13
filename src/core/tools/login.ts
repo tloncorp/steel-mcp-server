@@ -1,10 +1,13 @@
-// ABOUTME: Use an exact-origin saved login without exposing credentials, selectors, or account lists to the model.
+// ABOUTME: Discover credential metadata or request a policy-authorized login on the current site.
+// ABOUTME: Passwords and encryption factors never enter model-visible results.
 import { z } from 'zod';
 import type { ServerDeps, ToolHost } from '../context.js';
 import type { LoginOutcome } from '../vault/types.js';
-import { guard, sessionIdSchema, successResult } from './shared.js';
+import { guard, successResult, uuidSchema } from './shared.js';
 
 const messages: Record<LoginOutcome['status'], string> = {
+    approval_required:
+        'The saved login requires owner approval. Open the secure browser handoff; a chat reply does not authorize credential use.',
     no_match: 'No saved login matches this form. Open the secure browser handoff for the owner.',
     choice_required: 'Several saved accounts match. Open the secure browser handoff so the owner can choose.',
     filled: 'Saved login fields were filled securely. Inspect the resulting page; filling does not confirm sign-in or authorize any other action.',
@@ -19,9 +22,15 @@ export function registerLogin(host: ToolHost, deps: ServerDeps): void {
         {
             title: 'Use a saved login',
             description:
-                'Use a saved login on the current exact HTTPS origin, then attempt safe sign-in. Call when a login form appears. Returns status only; never returns credentials. Hand off when input or account selection is needed.',
+                'List login metadata or use an allowed login here. Hand off for approval. Never returns passwords.',
             annotations: { destructiveHint: true, openWorldHint: true },
-            inputSchema: z.object({ session_id: sessionIdSchema }).strict(),
+            inputSchema: z
+                .object({
+                    session_id: z.string(),
+                    action: z.enum(['list', 'use']).default('use'),
+                    record: z.object({ id: uuidSchema, revision: z.number().int().positive() }).strict().optional(),
+                })
+                .strict(),
         },
         (args, ctx) =>
             guard(deps, 'browser_login', ctx.mcpReq, async () => {
@@ -29,7 +38,15 @@ export function registerLogin(host: ToolHost, deps: ServerDeps): void {
                 let outcome: LoginOutcome = { status: 'unavailable' };
                 if (deps.vault) {
                     try {
-                        outcome = await deps.vault.login(record, ctx.mcpReq.signal);
+                        if (args.action === 'list')
+                            return successResult(
+                                { result: 'Saved logins for this site.' },
+                                {
+                                    session_id: record.handle,
+                                    accounts: await deps.vault.discover(record, ctx.mcpReq.signal),
+                                }
+                            );
+                        outcome = await deps.vault.login(record, ctx.mcpReq.signal, args.record);
                     } catch {
                         /* Service failures are deliberately summarized without remote data. */
                     }
