@@ -102,6 +102,55 @@ describe('SteelRestClient.scrape', () => {
     });
 });
 
+describe('SteelRestClient.prepareFormHandoff', () => {
+    it.each([
+        [409, 'stale_ref', 'stale_ref'],
+        [409, 'session_busy', 'session_busy'],
+        [409, 'unknown', 'steel_error'],
+        [500, 'stale_ref', 'steel_error'],
+    ])('maps preparation status %s with code %s to %s', async (status, code, expected) => {
+        const { api } = client([{ status: Number(status), body: { code, error: 'Preparation rejected.' } }]);
+        const error = await captureError(api.prepareFormHandoff('session', { pageId: 'page', fields: [] }));
+        expect(error.code).toBe(expected);
+        expect(error.details).toMatchObject({ status: Number(status), operation: 'form_prepare' });
+    });
+    it('does not interpret preparation codes on other endpoints', async () => {
+        const { api } = client([{ status: 409, body: { code: 'stale_ref', error: 'Conflict.' } }]);
+        expect((await captureError(api.getSession('session'))).code).toBe('steel_error');
+    });
+    it('sends only recorded field identities and returns the private capability', async () => {
+        const handoff = { viewer_url: 'https://viewer.test/s/form.signature', expires_at: 123456 };
+        const { api, calls } = client([{ body: handoff }]);
+        const selection = {
+            pageId: 'page-1',
+            fields: [
+                {
+                    backendNodeId: 10,
+                    frameId: 'frame-1',
+                    loaderId: 'loader-1',
+                    tagName: 'INPUT' as const,
+                    type: 'text',
+                    name: 'member',
+                    id: '',
+                    label: 'Member',
+                },
+            ],
+        };
+        expect(await api.prepareFormHandoff('session', selection)).toEqual(handoff);
+        expect(calls[0]).toMatchObject({
+            method: 'POST',
+            url: 'https://api.steel.dev/v1/sessions/session/credential-handoff',
+            body: selection,
+        });
+    });
+    it('rejects a response without a handoff capability', async () => {
+        const { api } = client([{ body: {} }]);
+        await expect(api.prepareFormHandoff('session', { pageId: 'page', fields: [] })).rejects.toThrow(
+            'invalid form handoff'
+        );
+    });
+});
+
 describe('SteelRestClient artifact endpoints', () => {
     it('returns the hosted URL for a screenshot rather than bytes', async () => {
         const { api } = client([{ body: { url: 'https://files.steel.dev/v1/static/abc.png' } }]);

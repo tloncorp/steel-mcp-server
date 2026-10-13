@@ -255,6 +255,107 @@ describe('browser_session_create', () => {
 });
 
 describe('browser_session_live_view', () => {
+    it('prepares selected snapshot controls through the authenticated native-card path', async () => {
+        const harness = await connect(
+            testDeps({
+                page: () => ({
+                    root: {
+                        tag: 'HTML',
+                        backendNodeId: 1,
+                        role: 'RootWebArea',
+                        children: [
+                            {
+                                tag: 'FORM',
+                                backendNodeId: 2,
+                                children: [
+                                    {
+                                        tag: 'INPUT',
+                                        backendNodeId: 3,
+                                        role: 'textbox',
+                                        name: 'Member',
+                                        attributes: { name: 'member' },
+                                        bounds: [10, 10, 200, 30],
+                                    },
+                                    {
+                                        tag: 'INPUT',
+                                        backendNodeId: 4,
+                                        role: 'textbox',
+                                        name: 'Unselected',
+                                        attributes: { name: 'other' },
+                                        bounds: [10, 50, 200, 30],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    loaderId: 'loader-1',
+                }),
+            })
+        );
+        const handle = await newSession(harness);
+        const [record] = await harness.deps.registry.list(harness.deps.principal);
+        await harness.client.callTool({ name: 'browser_snapshot', arguments: { session_id: handle } });
+        harness.deps.pool
+            .fixtureFor(record!.steelSessionId)!
+            .stub('Target.getTargetInfo', () => ({ targetInfo: { targetId: 'page-1' } }));
+        const result = await harness.client.callTool({
+            name: 'browser_session_live_view',
+            arguments: {
+                session_id: handle,
+                action: 'prepare_form',
+                fields: [{ name: 'member' }],
+            },
+        });
+        expect(isError(result)).toBe(false);
+        expect(harness.deps.api.preparedForms).toEqual([
+            {
+                sessionId: record!.steelSessionId,
+                request: {
+                    pageId: 'page-1',
+                    fields: [
+                        {
+                            backendNodeId: 3,
+                            frameId: 'main-frame',
+                            loaderId: 'loader-1',
+                            tagName: 'INPUT',
+                            type: 'text',
+                            name: 'member',
+                            id: '',
+                            label: 'Member',
+                            formBackendNodeId: 2,
+                        },
+                    ],
+                },
+            },
+        ]);
+        expect(result.structuredContent).toMatchObject({
+            session_id: handle,
+            viewer_url: 'https://viewer.test/s/private-form.signature',
+        });
+        expect(textOf(result)).not.toContain('private-form');
+        const invalid = await harness.client.callTool({
+            name: 'browser_session_live_view',
+            arguments: {
+                session_id: handle,
+                action: 'prepare_form',
+                fields: [{ name: 'missing' }],
+            },
+        });
+        expect(isError(invalid)).toBe(true);
+        expect(harness.deps.api.preparedForms).toHaveLength(1);
+        await harness.deps.registry.acquireHumanControl(handle, harness.deps.principal, 60_000);
+        const held = await harness.client.callTool({
+            name: 'browser_session_live_view',
+            arguments: {
+                session_id: handle,
+                action: 'prepare_form',
+                fields: [{ name: 'member' }],
+            },
+        });
+        expect(isError(held)).toBe(true);
+        expect(harness.deps.api.preparedForms).toHaveLength(1);
+    });
+
     it('resolves a fresh viewer URL from the authorized handle without putting it in text', async () => {
         const harness = await connect();
         const handle = await newSession(harness);
