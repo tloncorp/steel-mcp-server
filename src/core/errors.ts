@@ -56,13 +56,21 @@ export class SteelToolError extends Error {
 
 /** The Steel API's standardised error body. */
 export interface SteelErrorBody {
+    code?: string;
     message?: string;
     error?: string;
     linkToDocs?: string;
 }
 
 /** Which part of the surface produced the failure, so rate limits can be named precisely. */
-export type SteelOperation = 'session_create' | 'session_release' | 'browser_tool' | 'navigate' | 'cdp' | 'account';
+export type SteelOperation =
+    | 'session_create'
+    | 'session_release'
+    | 'form_prepare'
+    | 'browser_tool'
+    | 'navigate'
+    | 'cdp'
+    | 'account';
 
 export interface MapErrorContext {
     operation: SteelOperation;
@@ -98,6 +106,14 @@ export function mapSteelHttpError(status: number, body: SteelErrorBody, context:
     const linkToDocs = body.linkToDocs;
     const steelMessage = body.message ?? body.error ?? `Steel returned HTTP ${status}.`;
     const opts = { linkToDocs, details: { status, operation: context.operation } };
+
+    if (
+        status === 409 &&
+        context.operation === 'form_prepare' &&
+        (body.code === 'stale_ref' || body.code === 'session_busy')
+    ) {
+        return new SteelToolError(steelMessage, { ...opts, code: body.code });
+    }
 
     switch (status) {
         case 401:

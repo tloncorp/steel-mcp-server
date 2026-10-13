@@ -350,7 +350,7 @@ export class SteelRestClient implements SteelApi {
         const result = await this.requireJson<import('./selected-form.js').PreparedFormHandoff>({
             method: 'POST',
             path: `/sessions/${encodeURIComponent(sessionId)}/credential-handoff`,
-            operation: 'browser_tool',
+            operation: 'form_prepare',
             signal,
             body: { ...request },
         });
