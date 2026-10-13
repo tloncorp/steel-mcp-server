@@ -262,6 +262,11 @@ export interface CredentialContinuation {
 }
 
 export interface SteelApi {
+    prepareFormHandoff(
+        sessionId: string,
+        request: import('./selected-form.js').SelectedFormRequest,
+        signal?: AbortSignal
+    ): Promise<import('./selected-form.js').PreparedFormHandoff>;
     getBrowserMonitorStatus?(
         sessionId: string,
         signal?: AbortSignal

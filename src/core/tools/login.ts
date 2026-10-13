@@ -20,9 +20,8 @@ export function registerLogin(host: ToolHost, deps: ServerDeps): void {
     host.registerTool(
         'browser_login',
         {
-            title: 'Use a saved login',
-            description:
-                'List login metadata or use an allowed login here. Hand off for approval. Never returns passwords.',
+            title: 'Saved logins',
+            description: 'List login metadata or use an allowed login. Hand off for approval.',
             annotations: { destructiveHint: true, openWorldHint: true },
             inputSchema: z
                 .object({

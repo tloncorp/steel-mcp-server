@@ -13,7 +13,7 @@ import { recordBrowserUrl } from '../telemetry.js';
 import { defangMarkdownLinks, fenceUntrusted, stripInvisible } from '../untrusted.js';
 
 /** The `session_id` argument shared by every stateful tool. */
-export const sessionIdSchema = z.string().describe('Live session_id from browser_session_create.');
+export const sessionIdSchema = z.string().describe('From browser_session_create.');
 
 export const maxTokensSchema = z
     .number()
@@ -60,13 +60,9 @@ export async function guard(
         finish = deps.beginTool?.();
         if (
             deps.vault &&
-            [
-                'browser_session_live_view',
-                'browser_session_diagnostics',
-                'browser_session_replay',
-                'browser_screenshot',
-                'browser_pdf',
-            ].includes(_toolName)
+            ['browser_session_diagnostics', 'browser_session_replay', 'browser_screenshot', 'browser_pdf'].includes(
+                _toolName
+            )
         ) {
             throw new SteelToolError(
                 'This browser contains protected credentials. Use text inspection or the owner viewer.',

@@ -19,6 +19,7 @@ import {
     type SnapshotNode,
 } from './snapshot.js';
 import type { CdpSession } from './steel/cdp.js';
+import type { FormFieldSelector, SelectedFormRequest } from './steel/selected-form.js';
 import type { CredentialContinuation } from './steel/types.js';
 
 /**
@@ -187,6 +188,11 @@ function describeCdpNode(node: { nodeName?: string; attributes?: string[] } | un
 
 /** Drives one attached page over CDP. Every method reports what changed, never a bare success. */
 export class BrowserPage {
+    async selectFormFields(selectors: FormFieldSelector[]): Promise<SelectedFormRequest> {
+        const fields = this.state.selectFormFields(selectors);
+        const { targetInfo } = await this.session.send<{ targetInfo: { targetId: string } }>('Target.getTargetInfo');
+        return { pageId: targetInfo.targetId, fields };
+    }
     private constructor(
         private readonly session: CdpSession,
         private readonly state: PageState,
@@ -428,7 +434,12 @@ export class BrowserPage {
         if (
             snapshot.truncated ||
             snapshot.unreadableFrames > 0 ||
-            snapshot.nodes.some(node => node.sensitive && node.value !== undefined && node.value !== '[redacted:empty]')
+            snapshot.nodes.some(
+                node =>
+                    node.sensitive &&
+                    (['checkbox', 'radio', 'combobox', 'listbox'].includes(node.role) ||
+                        (node.value !== undefined && node.value !== '[redacted:empty]'))
+            )
         ) {
             throw new SteelToolError(
                 'A raw screenshot cannot safely expose this form. Use browser_snapshot for a redacted view, or let the person continue in the live browser.',

@@ -78,6 +78,29 @@ async function openPage(fixture: FixtureSession): Promise<BrowserPage> {
     return BrowserPage.attach(fixture.session, { budgets: FAST_BUDGETS });
 }
 
+describe('private form screenshots', () => {
+    it.each(['checkbox', 'radio', 'combobox', 'listbox'])(
+        'refuses a private %s even without a text value',
+        async role => {
+            const fixture = fixtureSession(
+                page([
+                    {
+                        tag: role === 'checkbox' || role === 'radio' ? 'INPUT' : 'SELECT',
+                        backendNodeId: 10,
+                        role,
+                        name: 'Private choice',
+                        bounds: [10, 10, 100, 20],
+                        attributes: { 'data-steel-private': 'true', type: role },
+                        inputValue: '',
+                    },
+                ])
+            );
+            const browser = await openPage(fixture);
+            await expect(browser.captureScreenshot({ fullPage: false })).rejects.toMatchObject({ code: 'forbidden' });
+        }
+    );
+});
+
 function catchSync(fn: () => unknown): SteelToolError | undefined {
     try {
         fn();

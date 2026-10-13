@@ -561,18 +561,24 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
         'browser_session_live_view',
         {
             title: 'Live view connection',
-            description: 'App-only viewer and control lease; no page content.',
+            description: 'App-only viewer, lease, and private form preparation.',
             annotations: { destructiveHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
-                    session_id: sessionIdSchema
-                        .optional()
-                        .describe(
-                            'Omit to stream the newest live session this credential owns, which is what a ' +
-                                'viewer that never received the session does.'
-                        ),
-                    action: z.enum(['connect', 'acquire', 'renew', 'release']).optional(),
+                    session_id: sessionIdSchema.optional().describe('Omit for this credential’s newest session.'),
+                    action: z.enum(['connect', 'prepare_form', 'acquire', 'renew', 'release']).optional(),
                     control_token: z.string().optional(),
+                    fields: z
+                        .array(
+                            z.union([
+                                z.string().regex(/^@e\d+$/),
+                                z.object({ name: z.string().min(1).max(512) }).strict(),
+                                z.object({ label: z.string().min(1).max(1024) }).strict(),
+                            ])
+                        )
+                        .min(1)
+                        .max(40)
+                        .optional(),
                 })
                 .strict(),
             _meta: { ui: { visibility: ['app'] } },
@@ -580,6 +586,33 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
         async (args, ctx) =>
             guard(deps, 'browser_session_live_view', ctx.mcpReq, async () => {
                 const action = args.action ?? 'connect';
+                if (deps.vault && action !== 'prepare_form')
+                    throw new SteelToolError('This browser contains protected credentials. Use the owner viewer.', {
+                        code: 'invalid_argument',
+                    });
+                if (action === 'prepare_form') {
+                    if (!args.session_id || !args.fields || args.control_token)
+                        throw new SteelToolError('Selected form preparation requires session_id and fields.', {
+                            code: 'invalid_argument',
+                        });
+                    const record = await deps.registry.resolveForAgent(args.session_id, deps.principal);
+                    const page = await deps.pool.page(record.steelSessionId, ctx.mcpReq.signal);
+                    await deps.vault?.assertSession(record);
+                    const selection = await page.selectFormFields(args.fields);
+                    const handoff = await deps.api.prepareFormHandoff(
+                        record.steelSessionId,
+                        selection,
+                        ctx.mcpReq.signal
+                    );
+                    return successResult(
+                        { result: 'Selected form prepared for private entry.' },
+                        { session_id: record.handle, ...handoff }
+                    );
+                }
+                if (args.fields)
+                    throw new SteelToolError('fields are only accepted for prepare_form.', {
+                        code: 'invalid_argument',
+                    });
                 if (action !== 'connect') {
                     if (!args.session_id) {
                         throw new SteelToolError('session_id is required for a human-control lease.', {
