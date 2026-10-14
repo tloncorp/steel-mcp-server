@@ -9,6 +9,7 @@ import {
     type EncryptedLogin,
     formTarget,
     type SecureForm,
+    type VaultBrowser,
     type VaultIdentity,
     type VaultProof,
     type VaultStore,
@@ -87,7 +88,7 @@ class Store implements VaultStore {
     }
 }
 
-export function fixture() {
+export function fixture(browser?: VaultBrowser) {
     let now = Date.now();
     const store = new Store();
     const cipher = new VaultCipher(root, 'primary');
@@ -101,8 +102,9 @@ export function fixture() {
         store,
         registry,
         now: () => now,
-        browser: {
+        browser: browser ?? {
             discover: async () => page,
+            getBound: async (_sessionId, formId) => (page?.formId === formId ? page : null),
             fill: async (sessionId, target, submittedValues, submit) => {
                 await beforeFill();
                 if (rejectFill || !page || target.formId !== page.formId) throw new Error('Form changed');

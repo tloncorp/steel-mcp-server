@@ -191,7 +191,7 @@ export class BrowserVault {
             const flowVersion = session.flowVersion;
             this.clearFlow(session, target.origin);
             for (const [id, handoff] of this.handoffs) if (handoff.sessionId === sessionId) this.handoffs.delete(id);
-            const form = await this.options.browser.discover(sessionId, signal);
+            const form = await this.options.browser.getBound(sessionId, target.formId, signal);
             if (!form || !loginFields(form) || JSON.stringify(formTarget(form)) !== JSON.stringify(target))
                 return { available: false };
             await this.options.store.verify(session.identity, { kind: 'browser', key: session.credential }, signal);

@@ -125,6 +125,7 @@ export type FormTarget = z.infer<typeof formTargetSchema>;
 
 export interface VaultBrowser {
     discover(sessionId: string, signal?: AbortSignal): Promise<SecureForm | null>;
+    getBound(sessionId: string, formId: string, signal?: AbortSignal): Promise<SecureForm | null>;
     fill(
         sessionId: string,
         form: SecureForm,

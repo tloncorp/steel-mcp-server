@@ -1,4 +1,5 @@
 // ABOUTME: Secret-bearing browser calls bypass MCP serialization and general REST error reporting.
+// ABOUTME: Handoffs resolve their bound form while agent login discovery inspects the current page.
 import { z } from 'zod';
 import { privateJson } from './transport.js';
 import { formTarget, type SecureForm, secureFormSchema, type VaultBrowser, VaultError } from './types.js';
@@ -15,10 +16,18 @@ export class PrivateVaultBrowser implements VaultBrowser {
     }
 
     async discover(sessionId: string, signal?: AbortSignal): Promise<SecureForm | null> {
+        return this.read(this.url(sessionId), signal);
+    }
+
+    async getBound(sessionId: string, formId: string, signal?: AbortSignal): Promise<SecureForm | null> {
+        const url = this.url(sessionId);
+        url.searchParams.set('formId', formId);
+        return this.read(url, signal);
+    }
+
+    private async read(url: URL, signal?: AbortSignal): Promise<SecureForm | null> {
         try {
-            const result = secureFormSchema.safeParse(
-                await privateJson(this.url(sessionId), { signal }, this.fetchImpl)
-            );
+            const result = secureFormSchema.safeParse(await privateJson(url, { signal }, this.fetchImpl));
             if (!result.success) throw new VaultError(503, 'The browser returned an invalid secure form.');
             return result.data;
         } catch (error) {
