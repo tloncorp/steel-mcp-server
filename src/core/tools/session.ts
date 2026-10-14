@@ -612,21 +612,24 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                         code: 'invalid_argument',
                     });
                 if (action === 'prepare_form') {
-                    if (!args.session_id || !args.fields || args.control_token)
-                        throw new SteelToolError('Selected form preparation requires session_id and fields.', {
+                    if (!args.session_id || args.control_token)
+                        throw new SteelToolError('Form preparation requires session_id and no control_token.', {
                             code: 'invalid_argument',
                         });
                     const record = await deps.registry.resolveForAgent(args.session_id, deps.principal);
-                    const page = await deps.pool.page(record.steelSessionId, ctx.mcpReq.signal);
                     await deps.vault?.assertSession(record);
-                    const selection = await page.selectFormFields(args.fields);
+                    const selection = args.fields
+                        ? await (await deps.pool.page(record.steelSessionId, ctx.mcpReq.signal)).selectFormFields(
+                              args.fields
+                          )
+                        : { discover: true as const };
                     const handoff = await deps.api.prepareFormHandoff(
                         record.steelSessionId,
                         selection,
                         ctx.mcpReq.signal
                     );
                     return successResult(
-                        { result: 'Selected form prepared for private entry.' },
+                        { result: 'Form prepared for private entry.' },
                         { session_id: record.handle, ...handoff }
                     );
                 }

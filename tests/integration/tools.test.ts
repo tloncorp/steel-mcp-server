@@ -130,6 +130,15 @@ describe('private saved-login tool', () => {
                 expect(isError(denied)).toBe(true);
                 expect(JSON.stringify(denied)).toContain('protected credentials');
             }
+
+            const prepared = await h.client.callTool({
+                name: 'browser_session_live_view',
+                arguments: { session_id: session, action: 'prepare_form' },
+            });
+            expect(isError(prepared)).toBe(false);
+            expect(prepared.structuredContent).toMatchObject({ session_id: session, viewer_url: expect.any(String) });
+            expect(deps.api.preparedForms[0]?.request).toEqual({ discover: true });
+            expect(deps.vault.assertSession).toHaveBeenCalled();
             login.mockRejectedValue(new Error('private-password private-owner-token'));
             const failed = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
             expect(failed.structuredContent).toMatchObject({ login: { status: 'unavailable' } });

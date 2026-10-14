@@ -344,7 +344,7 @@ export class SteelRestClient implements SteelApi {
 
     async prepareFormHandoff(
         sessionId: string,
-        request: import('./selected-form.js').SelectedFormRequest,
+        request: import('./selected-form.js').FormHandoffRequest,
         signal?: AbortSignal
     ) {
         const result = await this.requireJson<import('./selected-form.js').PreparedFormHandoff>({

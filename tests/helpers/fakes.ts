@@ -64,11 +64,11 @@ export const FAKE_VIEWPORT = { width: 1280, height: 720 };
 export class FakeSteelApi implements SteelApi {
     readonly preparedForms: Array<{
         sessionId: string;
-        request: import('../../src/core/steel/selected-form.js').SelectedFormRequest;
+        request: import('../../src/core/steel/selected-form.js').FormHandoffRequest;
     }> = [];
     async prepareFormHandoff(
         sessionId: string,
-        request: import('../../src/core/steel/selected-form.js').SelectedFormRequest
+        request: import('../../src/core/steel/selected-form.js').FormHandoffRequest
     ) {
         this.preparedForms.push({ sessionId, request });
         return { viewer_url: 'https://viewer.test/s/private-form.signature', expires_at: Date.now() + 300_000 };
