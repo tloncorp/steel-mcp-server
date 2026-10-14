@@ -20,6 +20,7 @@ import {
 } from '../steel/diagnostics.js';
 import type { AccountDetails, AgentTraceTimeline, SessionLogTimeline, SteelSession } from '../steel/types.js';
 import { fenceUntrusted } from '../untrusted.js';
+import { VaultError } from '../vault/types.js';
 import {
     cursorSchema,
     fencedPageState,
@@ -304,7 +305,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                         throw error;
                     }
 
-                    let record: HandleRecord;
+                    let record: HandleRecord | undefined;
                     try {
                         record = await deps.registry.create({
                             principal: deps.principal,
@@ -324,8 +325,28 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                                 persistProfile: persistProfile || undefined,
                             },
                         });
-                        await deps.vault?.bindSession(record, ctx.mcpReq.signal);
+                        if (deps.vault) {
+                            try {
+                                if (!(await deps.vault.bindSession(record, ctx.mcpReq.signal)))
+                                    throw new VaultError(403, 'Browser vault identity verification failed.');
+                            } catch (error) {
+                                if (error instanceof VaultError) throw error;
+                                throw new VaultError(
+                                    503,
+                                    'Browser vault setup failed. The credential service is unavailable.'
+                                );
+                            }
+                        }
                     } catch (error) {
+                        if (record) {
+                            await deps.registry
+                                .release(record.handle, deps.principal, 'explicit')
+                                .then(() => {
+                                    slotMayBeLive = false;
+                                })
+                                .catch(() => undefined);
+                            throw error;
+                        }
                         await deps.pool.close(steelSessionId).catch(() => undefined);
                         await deps.api
                             .releaseSession(steelSessionId)

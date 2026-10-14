@@ -20,7 +20,7 @@ import { createSessionPlanCodec, type SessionPlanState } from './core/session-pl
 import { SteelRestClient } from './core/steel/rest.js';
 import type { SteelApi } from './core/steel/types.js';
 import type { BrowserVault } from './core/vault/service.js';
-import { canonicalShip } from './core/vault/types.js';
+import { canonicalShip, VaultError, type VaultIdentity } from './core/vault/types.js';
 import type { RequestDepsInput } from './http.js';
 
 export interface HostedRuntimeOptions {
@@ -181,19 +181,19 @@ export class HostedRuntime {
                       assertSession: record => this.vault!.assertSession(record),
                       redact: result => this.vault!.redact(input.principal, result),
                       bindSession: async (record, signal) => {
+                          let identity: VaultIdentity;
                           try {
-                              return await this.vault!.bindSession(
-                                  record,
-                                  {
-                                      planet: canonicalShip(input.request.headers.get('x-tlon-parent-ship') ?? ''),
-                                      moon: canonicalShip(input.request.headers.get('x-tlon-ship') ?? ''),
-                                  },
-                                  input.credential,
-                                  signal
-                              );
+                              identity = {
+                                  planet: canonicalShip(input.request.headers.get('x-tlon-parent-ship') ?? ''),
+                                  moon: canonicalShip(input.request.headers.get('x-tlon-ship') ?? ''),
+                              };
                           } catch {
-                              return false;
+                              throw new VaultError(
+                                  403,
+                                  'Browser vault setup requires valid planet and moon identity headers.'
+                              );
                           }
+                          return this.vault!.bindSession(record, identity, input.credential, signal);
                       },
                       login: (record, signal, choice) => this.vault!.login(record, signal, choice),
                       discover: (record, signal) => this.vault!.discover(record, signal),

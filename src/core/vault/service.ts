@@ -142,8 +142,9 @@ export class BrowserVault {
                 flowVersion: 0,
             });
             return true;
-        } catch {
-            return false;
+        } catch (error) {
+            if (error instanceof VaultError) throw error;
+            throw new VaultError(503, 'Browser vault identity verification is unavailable.');
         }
     }
 

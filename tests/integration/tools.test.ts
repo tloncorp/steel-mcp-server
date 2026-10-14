@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSteelMcpServer } from '../../src/core/server.js';
 import { MAX_INLINE_SCREENSHOT_BYTES } from '../../src/core/tools/stateless.js';
 import { UNTRUSTED_FENCE_CLOSE, UNTRUSTED_FENCE_OPEN_TAG } from '../../src/core/untrusted.js';
+import { VaultError } from '../../src/core/vault/types.js';
 import { FakeSteelApi, testDeps } from '../helpers/fakes.js';
 
 type Deps = ReturnType<typeof testDeps>;
@@ -64,6 +65,42 @@ async function newSession(h: Harness = harness): Promise<string> {
 }
 
 describe('private saved-login tool', () => {
+    it.each([false, new Error('private-token'), new VaultError(403, 'Vault authorization failed.')])(
+        'rejects and reclaims a session when vault binding fails: %s',
+        async failure => {
+            const deps = testDeps();
+            deps.vault = {
+                assertSession: vi.fn(),
+                bindSession: vi.fn().mockImplementation(async () => {
+                    if (failure instanceof Error) throw failure;
+                    return failure;
+                }),
+                login: vi.fn(),
+                discover: vi.fn(),
+                hasProtectedValues: () => false,
+                redact: result => result,
+            };
+            const h = await connect(deps);
+            try {
+                const result = await h.client.callTool({ name: 'browser_session_create', arguments: {} });
+                expect(isError(result)).toBe(true);
+                expect(textOf(result)).toMatch(/vault/i);
+                if (failure instanceof VaultError) expect(textOf(result)).toContain(failure.message);
+                expect(JSON.stringify(result)).not.toContain('private-token');
+                expect(result.structuredContent).not.toHaveProperty('session_id');
+                expect(await deps.registry.list(deps.principal)).toEqual([]);
+                expect(deps.api.released).toHaveLength(1);
+                const id = deps.api.released[0]!;
+                expect(
+                    await deps.registry.reserveSessionSlot(deps.principal, 'replacement', Date.now() + 60_000, 1)
+                ).toBe(true);
+                expect(deps.pool.closed).toContain(id);
+            } finally {
+                await h.close();
+            }
+        }
+    );
+
     it('binds new sessions and returns only outcomes, with fixed errors on service failure', async () => {
         const deps = testDeps();
         const bindSession = vi.fn().mockResolvedValue(true);

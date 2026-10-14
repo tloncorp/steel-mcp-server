@@ -129,7 +129,9 @@ describe('planet-backed browser vault', () => {
     it('keeps two moons and two planets isolated and rejects forged routing hints', async () => {
         f.seed();
         const record = await f.session();
-        expect(await f.vault.bindSession(record, sibling, browserKey(alice))).toBe(false);
+        await expect(f.vault.bindSession(record, sibling, browserKey(alice))).rejects.toThrow(
+            'verification is unavailable'
+        );
         for (const identity of [sibling, other]) {
             const unrelated = await f.session(identity);
             expect(await f.vault.login(unrelated)).toEqual({ status: 'no_match' });
