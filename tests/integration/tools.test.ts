@@ -65,6 +65,14 @@ async function newSession(h: Harness = harness): Promise<string> {
 }
 
 describe('private saved-login tool', () => {
+    it('makes saved credentials discoverable by login, password, and autofill searches', async () => {
+        const { tools } = await harness.client.listTools();
+        const login = tools.find(tool => tool.name === 'browser_login')!;
+        for (const word of ['saved', 'credentials', 'login', 'password', 'autofill']) {
+            expect(login.description?.toLowerCase()).toContain(word);
+        }
+    });
+
     it.each([false, new Error('private-token'), new VaultError(403, 'Vault authorization failed.')])(
         'rejects and reclaims a session when vault binding fails: %s',
         async failure => {

@@ -21,7 +21,7 @@ export function registerLogin(host: ToolHost, deps: ServerDeps): void {
         'browser_login',
         {
             title: 'Saved logins',
-            description: 'List login metadata or use an allowed login. Hand off for approval.',
+            description: 'Saved credentials: list login/password metadata or autofill allowed logins.',
             annotations: { destructiveHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
