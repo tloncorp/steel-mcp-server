@@ -130,10 +130,18 @@ describe('private saved-login tool', () => {
                 session_id: session,
                 login: { status: 'filled', submission_attempted: true },
             });
-            for (const name of ['browser_session_live_view', 'browser_screenshot', 'browser_pdf']) {
+            for (const name of ['browser_screenshot', 'browser_pdf']) {
                 const denied = await h.client.callTool({
                     name,
                     arguments: name === 'browser_pdf' ? { url: 'https://example.com' } : { session_id: session },
+                });
+                expect(isError(denied)).toBe(true);
+                expect(JSON.stringify(denied)).toContain('protected credentials');
+            }
+            for (const action of ['acquire', 'renew', 'release']) {
+                const denied = await h.client.callTool({
+                    name: 'browser_session_live_view',
+                    arguments: { session_id: session, action },
                 });
                 expect(isError(denied)).toBe(true);
                 expect(JSON.stringify(denied)).toContain('protected credentials');

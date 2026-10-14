@@ -607,7 +607,7 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
         async (args, ctx) =>
             guard(deps, 'browser_session_live_view', ctx.mcpReq, async () => {
                 const action = args.action ?? 'connect';
-                if (deps.vault && action !== 'prepare_form')
+                if (deps.vault && action !== 'prepare_form' && action !== 'connect')
                     throw new SteelToolError('This browser contains protected credentials. Use the owner viewer.', {
                         code: 'invalid_argument',
                     });
@@ -696,6 +696,7 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                 const record = args.session_id
                     ? await deps.registry.resolve(args.session_id, deps.principal)
                     : await newestLiveSession(deps);
+                await deps.vault?.assertSession(record);
                 let session: SteelSession;
                 try {
                     // Read fresh every time: Steel re-mints the token on each read, and an expiring
@@ -716,6 +717,23 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                     throw new SteelToolError('This browser session is not live. Start a new session.', {
                         code: 'invalid_argument',
                     });
+                }
+
+                if (deps.vault) {
+                    if (!session.sessionViewerUrl)
+                        throw new SteelToolError('Steel returned no owner viewer for this session.', {
+                            code: 'steel_error',
+                        });
+                    // The owner authenticates at the viewer gateway. Direct CDP can
+                    // expose protected values and is not part of this handoff.
+                    return successResult(
+                        { result: 'Owner viewer connection details for this session.' },
+                        {
+                            session_id: record.handle,
+                            viewer_url: session.sessionViewerUrl,
+                            expires_at: new Date(record.expiresAt).toISOString(),
+                        }
+                    );
                 }
 
                 const cdpUrl = session.websocketUrl;
