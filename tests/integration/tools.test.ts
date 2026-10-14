@@ -151,7 +151,7 @@ describe('private saved-login tool', () => {
             const approval = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
             expect(approval.structuredContent).toMatchObject({
                 login: { status: 'approval_required' },
-                next_step: expect.stringContaining(`browser handoff ${session}`),
+                next_step: expect.stringContaining(`browser approve-login ${session}`),
             });
             expect(approval.structuredContent).toMatchObject({ next_step: expect.stringContaining('Wait') });
             login.mockRejectedValue(new Error('private-password private-owner-token'));

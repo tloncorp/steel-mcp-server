@@ -52,7 +52,7 @@ export function registerLogin(host: ToolHost, deps: ServerDeps): void {
                 }
                 const nextStep =
                     outcome.status === 'approval_required'
-                        ? `Wait for the owner to approve the secure form card. Do not retry login or create another session while waiting. If no card arrived, send one using the Tlon tool command "browser handoff ${record.handle}". Approval happens in the card, not in chat.`
+                        ? `Wait for the owner to approve the secure form card. Do not retry login or create another session while waiting. If no card arrived, send one using the Tlon tool command "browser approve-login ${record.handle}". Approval happens in the card, not in chat.`
                         : messages[outcome.status];
                 return successResult(
                     { result: nextStep },
