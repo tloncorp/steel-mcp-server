@@ -147,13 +147,20 @@ describe('private saved-login tool', () => {
             expect(prepared.structuredContent).toMatchObject({ session_id: session, viewer_url: expect.any(String) });
             expect(deps.api.preparedForms[0]?.request).toEqual({ discover: true });
             expect(deps.vault.assertSession).toHaveBeenCalled();
+            login.mockResolvedValueOnce({ status: 'approval_required' });
+            const approval = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
+            expect(approval.structuredContent).toMatchObject({
+                login: { status: 'approval_required' },
+                next_step: expect.stringContaining(`browser handoff ${session}`),
+            });
+            expect(approval.structuredContent).toMatchObject({ next_step: expect.stringContaining('Wait') });
             login.mockRejectedValue(new Error('private-password private-owner-token'));
             const failed = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
             expect(failed.structuredContent).toMatchObject({ login: { status: 'unavailable' } });
             expect(JSON.stringify(failed)).not.toMatch(/private-password|private-owner-token/);
             const wrong = await h.client.callTool({ name: 'browser_login', arguments: { session_id: 'unknown' } });
             expect(isError(wrong)).toBe(true);
-            expect(login).toHaveBeenCalledTimes(2);
+            expect(login).toHaveBeenCalledTimes(3);
         } finally {
             await h.close();
         }

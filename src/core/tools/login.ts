@@ -50,9 +50,13 @@ export function registerLogin(host: ToolHost, deps: ServerDeps): void {
                         /* Service failures are deliberately summarized without remote data. */
                     }
                 }
+                const nextStep =
+                    outcome.status === 'approval_required'
+                        ? `Wait for the owner to approve the secure form card. Do not retry login or create another session while waiting. If no card arrived, send one using the Tlon tool command "browser handoff ${record.handle}". Approval happens in the card, not in chat.`
+                        : messages[outcome.status];
                 return successResult(
-                    { result: messages[outcome.status] },
-                    { session_id: record.handle, login: outcome }
+                    { result: nextStep },
+                    { session_id: record.handle, login: outcome, next_step: nextStep }
                 );
             })
     );
