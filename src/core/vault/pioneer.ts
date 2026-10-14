@@ -34,10 +34,12 @@ export class PioneerVaultStore implements VaultStore {
             example.pathname !== '/' ||
             example.search ||
             example.hash ||
-            !pioneerToken.trim() ||
+            pioneerToken.trim().length < 32 ||
             /[\r\n]/.test(pioneerToken)
         ) {
-            throw new Error('The vault requires an HTTPS Pioneer origin template and a Pioneer sidecar token.');
+            throw new Error(
+                'The vault requires an HTTPS Pioneer origin template and a scoped Pioneer vault token of at least 32 characters.'
+            );
         }
     }
 

@@ -254,6 +254,19 @@ describe('planet-backed browser vault', () => {
         ).rejects.toThrow('already used');
     });
 
+    it('refuses malformed internationalized origins before preparing a save', async () => {
+        const record = await f.session();
+        const invalid = { ...form(), origin: 'https://xn--', frameUrl: 'https://xn--/login' };
+        f.page(invalid);
+        const handoffId = randomBytes(32).toString('base64url');
+        expect(
+            await f.vault.prepare(record.steelSessionId, handoffId, formTarget(invalid), Date.now() + 60_000)
+        ).toEqual({ available: false });
+        await expect(f.vault.authorize(handoffId, alice.planet, owner(alice))).rejects.toThrow('invalid');
+        expect(f.store.records.size).toBe(0);
+        expect(f.fills).toEqual([]);
+    });
+
     it('reports save failure separately from fill success and rejects unsafe or OTP forms', async () => {
         const record = await f.session();
         const auth = await f.handoff(record);

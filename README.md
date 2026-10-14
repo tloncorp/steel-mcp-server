@@ -278,7 +278,7 @@ called and the error text.
 
 Self-hosted operators enable private saved-login filling with `BROWSER_VAULT_ENABLED=true`.
 Configuration requires `BROWSER_VAULT_KEY` (base64, 32 random bytes), `BROWSER_VAULT_KEY_ID`,
-`BROWSER_VAULT_SERVICE_TOKEN` (at least 32 characters), `PIONEER_SIDECAR_TOKEN`, and `BROWSER_VAULT_PIONEER_ORIGIN`
+`BROWSER_VAULT_SERVICE_TOKEN` (at least 32 characters), `PIONEER_BROWSER_VAULT_TOKEN`, and `BROWSER_VAULT_PIONEER_ORIGIN`
 (an HTTPS origin template containing `{planet}`). The encryption key is durable deployment
 state: back it up and keep it consistent across browser clusters in the same environment.
 Changing the encryption key requires an explicit re-encryption migration; moon-code and owner-token rotation do not.

@@ -26,7 +26,7 @@ export function loadVault(
     const serviceToken = required('BROWSER_VAULT_SERVICE_TOKEN');
     const store = new PioneerVaultStore(
         required('BROWSER_VAULT_PIONEER_ORIGIN'),
-        required('PIONEER_SIDECAR_TOKEN'),
+        required('PIONEER_BROWSER_VAULT_TOKEN'),
         fetch,
         loginMigration(required('BROWSER_VAULT_KEY'), cipher)
     );
