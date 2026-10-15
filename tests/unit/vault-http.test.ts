@@ -1,11 +1,15 @@
 // ABOUTME: The owner HTTP surface is service-authenticated, bounded, and secret-safe on errors.
+// ABOUTME: Invalid proofs, records, and remote failures never expose private response data.
 import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PrivateVaultBrowser } from '../../src/core/vault/browser.js';
 import { loadVault } from '../../src/core/vault/config.js';
 import { VaultCipher } from '../../src/core/vault/crypto.js';
 import { PioneerVaultStore } from '../../src/core/vault/pioneer.js';
 import type { BrowserVault } from '../../src/core/vault/service.js';
+import { formTarget } from '../../src/core/vault/types.js';
 import { createVaultHttp } from '../../src/vault-http.js';
+import { alice, fixture, form, owner, pair, values } from '../helpers/vault.js';
 
 const token = 'service-secret-'.repeat(4);
 const identity = { planet: 'sampel-palnet', moon: 'pinser-botter-sampel-palnet' };
@@ -128,6 +132,9 @@ describe('Pioneer vault protocol', () => {
                 revision: 1,
                 createdAt: 1,
                 updatedAt: 1,
+                label: 'Personal',
+                permission: 'ask',
+                factor: Buffer.alloc(32, 9).toString('base64'),
             },
             { password: 'fixture-password', label: 'Personal' }
         );
@@ -152,7 +159,7 @@ describe('Pioneer vault protocol', () => {
         );
     });
 
-    it('uses the existing Pioneer token independently of the viewer service token', () => {
+    it('uses the existing Pioneer sidecar token independently of the viewer service token', () => {
         const env = {
             BROWSER_VAULT_ENABLED: 'true',
             BROWSER_VAULT_KEY: Buffer.alloc(32, 7).toString('base64'),
@@ -161,8 +168,58 @@ describe('Pioneer vault protocol', () => {
             BROWSER_VAULT_PIONEER_ORIGIN: 'https://{planet}-feds.example',
         };
         expect(() => loadVault(env, 'http://127.0.0.1:3000')).toThrow('PIONEER_SIDECAR_TOKEN is required');
-        const loaded = loadVault({ ...env, PIONEER_SIDECAR_TOKEN: 'pioneer-existing-token' }, 'http://127.0.0.1:3000');
+        const loaded = loadVault({ ...env, PIONEER_SIDECAR_TOKEN: 'existing-pioneer-token' }, 'http://127.0.0.1:3000');
         expect(loaded?.serviceToken).toBe(token);
         expect(loaded?.create).toBeTypeOf('function');
+    });
+});
+
+describe('bound login preparation', () => {
+    it.each([404, 409])('refuses an unavailable bound form (%s) without rediscovering', async status => {
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}', { status }));
+        const f = fixture(new PrivateVaultBrowser('http://browser.test', fetcher));
+        const record = await f.session();
+        const prepared = f.vault.prepare(
+            record.steelSessionId,
+            'stale-handoff',
+            formTarget(form()),
+            Date.now() + 60_000
+        );
+        if (status === 404) expect(await prepared).toEqual({ available: false });
+        else await expect(prepared).rejects.toThrow();
+        expect(fetcher).toHaveBeenCalledOnce();
+        expect(new URL(String(fetcher.mock.calls[0]![0])).searchParams.get('formId')).toBe(form().formId);
+        await expect(f.vault.authorize('stale-handoff', alice.planet, owner(alice))).rejects.toThrow(
+            'invalid, expired'
+        );
+    });
+
+    it('opens and saves the exact selected form without rediscovering the page', async () => {
+        const selected = { ...form(), formId: 'selected-login' };
+        const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+            const url = new URL(String(input));
+            if (init?.method === 'POST') return Response.json({ submitted: true });
+            return Response.json(url.searchParams.get('formId') === selected.formId ? selected : form());
+        });
+        const f = fixture(new PrivateVaultBrowser('http://browser.test', fetcher));
+        const record = await f.session();
+        expect(
+            await f.vault.prepare(record.steelSessionId, 'selected-handoff', formTarget(selected), Date.now() + 60_000)
+        ).toEqual({ available: true, ...alice });
+        expect(new URL(String(fetcher.mock.calls[0]![0])).searchParams.get('formId')).toBe(selected.formId);
+        const auth = await f.vault.authorize('selected-handoff', alice.planet, owner(alice));
+        expect(
+            await f.vault.fill({
+                handoffId: 'selected-handoff',
+                grant: auth.grant,
+                values,
+                submit: true,
+                save: { permission: 'ask' },
+            })
+        ).toEqual({ ok: true, submitted: true, saveStatus: 'saved' });
+        const saved = f.store.records.get(pair(alice))!;
+        expect(saved).toHaveLength(1);
+        expect(saved[0]!.permission).toBe('ask');
+        expect(JSON.stringify(saved)).not.toContain(values.f1);
     });
 });

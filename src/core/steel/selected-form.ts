@@ -18,6 +18,8 @@ export interface SelectedFormRequest {
     fields: SelectedFormControl[];
 }
 
+export type FormHandoffRequest = SelectedFormRequest | { discover: true };
+
 export interface PreparedFormHandoff {
     viewer_url: string;
     expires_at: number;

@@ -1,4 +1,5 @@
-// ABOUTME: The planet-backed login vault. Only private browser operations receive decrypted passwords.
+// ABOUTME: Ship-stored credentials expose metadata to bots and enforce owner-selected reuse permission.
+// ABOUTME: Owner handoffs fill once; automatic fills require the current stored allow policy.
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { HandleRecord, HandleRegistry } from '../registry.js';
@@ -30,9 +31,14 @@ export const vaultFillSchema = z
         handoffId: z.string().regex(/^[A-Za-z0-9_-]{40,64}$/),
         values: z.record(z.string().regex(/^f\d{1,2}$/), z.string().max(4096)).optional(),
         submit: z.boolean(),
+        allowAutomatic: z.boolean().optional(),
         grant: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
         save: z
-            .object({ label: z.string().trim().min(1).max(256).optional(), update: recordChoiceSchema.optional() })
+            .object({
+                label: z.string().trim().min(1).max(256).optional(),
+                update: recordChoiceSchema.optional(),
+                permission: z.enum(['ask', 'allow']).optional(),
+            })
             .strict()
             .optional(),
         use: recordChoiceSchema.optional(),
@@ -50,6 +56,7 @@ type BoundSession = {
     principal: string;
     expiresAt: number;
     attempts: Set<string>;
+    secrets: Set<string>;
     flowVersion: number;
     selected?: RecordChoice & { origin: string; expiresAt: number };
     pending?: { origin: string; username?: string; label?: string; update?: RecordChoice; expiresAt: number };
@@ -75,18 +82,16 @@ function safeEqual(left: string, right: string): boolean {
     return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function summaries(cipher: VaultCipher, identity: VaultIdentity, records: EncryptedLogin[]): LoginSummary[] {
-    return records.map(record => {
-        const secret = cipher.decrypt(identity, record);
-        return {
-            id: record.id,
-            origin: record.origin,
-            revision: record.revision,
-            updatedAt: record.updatedAt,
-            label: secret.label,
-            ...(secret.username ? { username: secret.username } : {}),
-        };
-    });
+function summaries(records: EncryptedLogin[]): LoginSummary[] {
+    return records.map(({ id, origin, revision, updatedAt, label, username, permission }) => ({
+        id,
+        origin,
+        revision,
+        updatedAt,
+        label,
+        ...(username ? { username } : {}),
+        permission,
+    }));
 }
 
 function validValues(form: SecureForm, values: Record<string, string>): boolean {
@@ -133,11 +138,13 @@ export class BrowserVault {
                 principal: record.principal,
                 expiresAt: record.expiresAt,
                 attempts: new Set(),
+                secrets: new Set(),
                 flowVersion: 0,
             });
             return true;
-        } catch {
-            return false;
+        } catch (error) {
+            if (error instanceof VaultError) throw error;
+            throw new VaultError(503, 'Browser vault identity verification is unavailable.');
         }
     }
 
@@ -184,7 +191,7 @@ export class BrowserVault {
             const flowVersion = session.flowVersion;
             this.clearFlow(session, target.origin);
             for (const [id, handoff] of this.handoffs) if (handoff.sessionId === sessionId) this.handoffs.delete(id);
-            const form = await this.options.browser.discover(sessionId, signal);
+            const form = await this.options.browser.getBound(sessionId, target.formId, signal);
             if (!form || !loginFields(form) || JSON.stringify(formTarget(form)) !== JSON.stringify(target))
                 return { available: false };
             await this.options.store.verify(session.identity, { kind: 'browser', key: session.credential }, signal);
@@ -206,6 +213,46 @@ export class BrowserVault {
         return handoff;
     }
 
+    async assertSession(record: HandleRecord): Promise<void> {
+        await this.session(record.steelSessionId, true);
+    }
+
+    hasProtectedValues(principal: string): boolean {
+        return [...this.sessions.values()].some(session => session.principal === principal && session.secrets.size > 0);
+    }
+
+    redact<T>(principal: string, result: T): T {
+        const values = [...this.sessions.values()]
+            .filter(session => session.principal === principal)
+            .flatMap(session => [...session.secrets])
+            .flatMap(value => [
+                value,
+                encodeURIComponent(value),
+                Buffer.from(value).toString('base64'),
+                JSON.stringify(value).slice(1, -1),
+            ])
+            .sort((a, b) => b.length - a.length);
+        const clean = (value: unknown): unknown => {
+            if (typeof value === 'string') {
+                for (const secret of values) value = (value as string).split(secret).join('[redacted]');
+                return value;
+            }
+            if (Array.isArray(value)) return value.map(clean);
+            if (value && typeof value === 'object')
+                return Object.fromEntries(
+                    Object.entries(value).map(([key, child]) => [String(clean(key)), clean(child)])
+                );
+            return value;
+        };
+        return clean(result) as T;
+    }
+
+    async authorizeViewer(sessionId: string, planet: string, ownerToken: string, signal?: AbortSignal): Promise<void> {
+        const session = await this.session(sessionId);
+        if (session.identity.planet !== planet) throw new VaultError(403, 'This browser belongs to another planet.');
+        await this.options.store.verify(session.identity, { kind: 'owner', token: ownerToken }, signal);
+    }
+
     async authorize(
         handoffId: string,
         planet: string,
@@ -222,11 +269,7 @@ export class BrowserVault {
         handoff.grant = { token, ownerToken };
         return {
             grant: token,
-            accounts: summaries(
-                this.options.cipher,
-                session.identity,
-                records.filter(record => record.origin === handoff.form.origin)
-            ),
+            accounts: summaries(records.filter(record => record.origin === handoff.form.origin)),
         };
     }
 
@@ -304,6 +347,11 @@ export class BrowserVault {
             if (!validValues(handoff.form, values))
                 throw new VaultError(400, 'This saved login does not supply the requested fields.');
             if (existing) session.attempts.add(this.attempt(existing, handoff.form));
+            Object.values(values)
+                .filter(Boolean)
+                .forEach(value => {
+                    session.secrets.add(value);
+                });
             const result = await this.options.browser.fill(
                 handoff.sessionId,
                 handoff.form,
@@ -319,9 +367,24 @@ export class BrowserVault {
                     ...(input.save ? { saveStatus: 'failed' as const } : {}),
                 };
             if (input.use && existing) {
+                let revision = existing.revision;
+                if (input.allowAutomatic !== undefined && fields.password) {
+                    const permission = input.allowAutomatic ? 'allow' : 'ask';
+                    if (permission !== existing.permission) {
+                        await this.options.store.permission(
+                            session.identity,
+                            ownerProof,
+                            existing.id,
+                            existing.revision,
+                            permission,
+                            signal
+                        );
+                        revision += 1;
+                    }
+                }
                 session.selected = {
                     id: existing.id,
-                    revision: existing.revision,
+                    revision,
                     origin: existing.origin,
                     expiresAt: Math.min(this.now() + HANDOFF_MS, session.expiresAt),
                 };
@@ -351,6 +414,9 @@ export class BrowserVault {
                         revision: (existing?.revision ?? 0) + 1,
                         createdAt: existing?.createdAt ?? now,
                         updatedAt: now,
+                        label: secret.label,
+                        permission: input.save?.permission ?? 'ask',
+                        factor: await this.options.store.factor(session.identity, ownerProof, signal),
                     },
                     secret
                 );
@@ -382,7 +448,7 @@ export class BrowserVault {
         return JSON.stringify([login.id, login.revision, login.origin, form.fields.map(field => field.purpose).sort()]);
     }
 
-    async login(record: HandleRecord, signal?: AbortSignal): Promise<LoginOutcome> {
+    async login(record: HandleRecord, signal?: AbortSignal, choice?: RecordChoice): Promise<LoginOutcome> {
         return this.exclusive(record.steelSessionId, async () => {
             const session = await this.session(record.steelSessionId, true);
             if (session.principal !== record.principal || session.handle !== record.handle)
@@ -394,19 +460,25 @@ export class BrowserVault {
                 await this.options.store.list(session.identity, { kind: 'browser', key: session.credential }, signal)
             ).filter(login => login.origin === form.origin);
             if (!matches.length) return { status: 'no_match' };
-            const selected = session.selected;
+            const selected = choice ?? session.selected;
             const login = selected
                 ? matches.find(match => match.id === selected.id && match.revision === selected.revision)
                 : matches.length === 1
                   ? matches[0]
                   : undefined;
             if (!login) return { status: selected ? 'needs_input' : 'choice_required' };
+            if (login.permission !== 'allow') return { status: 'approval_required' };
             const attempt = this.attempt(login, form);
             if (session.attempts.has(attempt)) return { status: 'needs_input' };
             const values = this.values(form, this.options.cipher.decrypt(session.identity, login));
             if (!validValues(form, values)) return { status: 'needs_input' };
             if (this.now() >= session.expiresAt) throw new VaultError(401, 'The browser session expired.');
             session.attempts.add(attempt);
+            Object.values(values)
+                .filter(Boolean)
+                .forEach(value => {
+                    session.secrets.add(value);
+                });
             const result = await this.options.browser.fill(record.steelSessionId, form, values, true, signal);
             session.selected = {
                 id: login.id,
@@ -419,11 +491,36 @@ export class BrowserVault {
         });
     }
 
-    async list(identity: VaultIdentity, ownerToken: string, signal?: AbortSignal): Promise<LoginSummary[]> {
+    async discover(record: HandleRecord, signal?: AbortSignal): Promise<LoginSummary[]> {
+        const session = await this.session(record.steelSessionId, true);
+        if (session.principal !== record.principal) throw new VaultError(403, 'Browser authorization failed.');
+        const form = await this.options.browser.discover(record.steelSessionId, signal);
+        if (!form || !loginFields(form)) return [];
         return summaries(
-            this.options.cipher,
+            (
+                await this.options.store.list(session.identity, { kind: 'browser', key: session.credential }, signal)
+            ).filter(login => login.origin === form.origin)
+        );
+    }
+
+    async list(identity: VaultIdentity, ownerToken: string, signal?: AbortSignal): Promise<LoginSummary[]> {
+        return summaries(await this.options.store.list(identity, { kind: 'owner', token: ownerToken }, signal));
+    }
+
+    async setPermission(
+        identity: VaultIdentity,
+        ownerToken: string,
+        choice: RecordChoice,
+        permission: 'ask' | 'allow',
+        signal?: AbortSignal
+    ): Promise<void> {
+        await this.options.store.permission(
             identity,
-            await this.options.store.list(identity, { kind: 'owner', token: ownerToken }, signal)
+            { kind: 'owner', token: ownerToken },
+            choice.id,
+            choice.revision,
+            permission,
+            signal
         );
     }
 

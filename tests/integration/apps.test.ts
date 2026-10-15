@@ -255,6 +255,54 @@ describe('browser_session_create', () => {
 });
 
 describe('browser_session_live_view', () => {
+    it.each(['', 'wss://viewer.test/cdp?cap=private'])(
+        'shares a vault session through its owner viewer without returning CDP (%s)',
+        async websocketUrl => {
+            const deps = testDeps();
+            deps.vault = {
+                assertSession: vi.fn(),
+                bindSession: vi.fn().mockResolvedValue(true),
+                login: vi.fn(),
+                discover: vi.fn(),
+                hasProtectedValues: () => true,
+                redact: result => result,
+            };
+            const harness = await connect(deps);
+            const handle = await newSession(harness);
+            const [record] = await deps.registry.list(deps.principal);
+            const read = vi.spyOn(deps.api, 'getSession').mockResolvedValue({
+                id: record!.steelSessionId,
+                status: 'live',
+                sessionViewerUrl: 'https://viewer.test/s/owner-entry.signature',
+                websocketUrl,
+            });
+
+            const { result, structured } = await liveView(harness, handle);
+            expect(isError(result)).toBe(false);
+            expect(structured).toMatchObject({
+                session_id: handle,
+                viewer_url: 'https://viewer.test/s/owner-entry.signature',
+            });
+            expect(structured).not.toHaveProperty('cdp_url');
+            expect(textOf(result)).not.toContain('owner-entry');
+            expect(JSON.stringify(result)).not.toContain('cap=private');
+            expect(deps.vault.assertSession).toHaveBeenCalledWith(record);
+
+            read.mockResolvedValueOnce({ id: record!.steelSessionId, status: 'live', websocketUrl });
+            const missingViewer = await liveView(harness, handle);
+            expect(isError(missingViewer.result)).toBe(true);
+            expect(textOf(missingViewer.result)).toContain('owner viewer');
+            expect(missingViewer.structured).not.toHaveProperty('cdp_url');
+
+            read.mockClear();
+            vi.mocked(deps.vault.assertSession).mockRejectedValueOnce(new Error('Identity mismatch'));
+            const unauthorized = await liveView(harness, handle);
+            expect(isError(unauthorized.result)).toBe(true);
+            expect(unauthorized.structured).not.toHaveProperty('viewer_url');
+            expect(read).not.toHaveBeenCalled();
+        }
+    );
+
     it('prepares selected snapshot controls through the authenticated native-card path', async () => {
         const harness = await connect(
             testDeps({

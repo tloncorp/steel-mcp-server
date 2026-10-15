@@ -178,6 +178,7 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                             break;
                         }
                         snapshot = await page.snapshot({ interactiveOnly: false });
+                        if (deps.vault) snapshot = deps.vault.redact(snapshot);
                         const hasSensitiveFields = snapshot.nodes.some(node => node.requiresSecureEntry && node.ref);
                         await check();
                         const evidence = runEvidence(snapshot);
@@ -320,6 +321,7 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                     }
                     await check();
                     snapshot = await page.snapshot({ interactiveOnly: false });
+                    if (deps.vault) snapshot = deps.vault.redact(snapshot);
                 } catch (error) {
                     status = ctx.mcpReq.signal.aborted ? 'cancelled' : timeout.aborted ? 'timeout' : 'error';
                     errorCode = error instanceof SteelToolError ? error.code : undefined;

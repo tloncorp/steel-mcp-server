@@ -39,8 +39,16 @@ export interface SessionPool {
 export interface ServerDeps {
     /** Bound to this request's credential. Secrets stay inside the private vault service. */
     vault?: {
+        assertSession(record: HandleRecord): Promise<void>;
+        hasProtectedValues(): boolean;
+        redact<T>(result: T): T;
         bindSession(record: HandleRecord, signal?: AbortSignal): Promise<boolean>;
-        login(record: HandleRecord, signal?: AbortSignal): Promise<LoginOutcome>;
+        login(
+            record: HandleRecord,
+            signal?: AbortSignal,
+            choice?: { id: string; revision: number }
+        ): Promise<LoginOutcome>;
+        discover(record: HandleRecord, signal?: AbortSignal): Promise<import('./vault/types.js').LoginSummary[]>;
     };
     /** Pins hosted clients for one tool operation; the returned callback releases the pin. */
     beginTool?: (() => () => void) | undefined;

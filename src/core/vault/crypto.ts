@@ -1,4 +1,5 @@
-// ABOUTME: Authenticated, planet/moon-scoped encryption. The deployment key never enters a session record.
+// ABOUTME: Password encryption combines a durable server key with a ship-code-derived factor.
+// ABOUTME: Identity and immutable credential metadata bind each authenticated ciphertext.
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import {
     type EncryptedLogin,
@@ -29,13 +30,13 @@ export class VaultCipher {
         }
     }
 
-    private key(identity: VaultIdentity): Buffer {
+    private key(identity: VaultIdentity & { id: string; factor: string }): Buffer {
         return Buffer.from(
             hkdfSync(
                 'sha256',
                 this.rootKey,
-                'tlon/browser-vault/v1',
-                JSON.stringify([identity.planet, identity.moon]),
+                Buffer.from(identity.factor, 'base64'),
+                JSON.stringify(['tlon/browser-vault/v2', identity.planet, identity.moon, identity.id]),
                 32
             )
         );
@@ -44,22 +45,28 @@ export class VaultCipher {
     private aad(record: LoginMetadata): Buffer {
         return Buffer.from(
             JSON.stringify([
-                'tlon/browser-vault',
+                'tlon/browser-vault/v2',
                 record.version,
                 record.keyId,
                 record.planet,
                 record.moon,
                 record.id,
                 record.origin,
-                record.revision,
+                record.label,
+                record.factor,
                 record.createdAt,
-                record.updatedAt,
+                ...(record.username === undefined ? [] : [record.username]),
             ])
         );
     }
 
-    encrypt(metadata: Omit<LoginMetadata, 'version' | 'keyId'>, secret: LoginSecret): EncryptedLogin {
-        const record: LoginMetadata = { ...metadata, version: 1, keyId: this.keyId };
+    encrypt(metadata: Omit<LoginMetadata, 'version' | 'keyId' | 'username'>, secret: LoginSecret): EncryptedLogin {
+        const record: LoginMetadata = {
+            ...metadata,
+            ...(secret.username ? { username: secret.username } : {}),
+            version: 2,
+            keyId: this.keyId,
+        };
         const nonce = randomBytes(12);
         const key = this.key(record);
         const plaintext = Buffer.from(JSON.stringify(loginSecretSchema.parse(secret)));
@@ -86,7 +93,7 @@ export class VaultCipher {
             const record = encryptedLoginSchema.parse(encrypted);
             if (record.planet !== identity.planet || record.moon !== identity.moon || record.keyId !== this.keyId)
                 throw new Error();
-            key = this.key(identity);
+            key = this.key(record);
             const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(record.nonce, 'base64'), {
                 authTagLength: 16,
             });

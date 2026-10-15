@@ -8,6 +8,6 @@
     "toolBytes": {
         "browser_session_create": 1200,
         "browser_session_options": 950,
-        "browser_login": 700
+        "browser_login": 800
     }
 }

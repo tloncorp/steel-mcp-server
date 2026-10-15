@@ -1,147 +1,10 @@
 // ABOUTME: Vault partitioning, authorization, encryption, and one-use login flow invariants.
+// ABOUTME: Credential use requires current consent and never returns decrypted secrets.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { InMemoryHandleRegistry, principalFromCredential } from '../../src/core/registry.js';
 import { VaultCipher } from '../../src/core/vault/crypto.js';
-import { BrowserVault } from '../../src/core/vault/service.js';
-import {
-    type EncryptedLogin,
-    formTarget,
-    type SecureForm,
-    type VaultIdentity,
-    type VaultProof,
-    type VaultStore,
-} from '../../src/core/vault/types.js';
-
-const root = Buffer.alloc(32, 7).toString('base64');
-const alice = { planet: 'sampel-palnet', moon: 'pinser-botter-sampel-palnet' };
-const sibling = { ...alice, moon: 'worlet-samtes-sampel-palnet' };
-const other = { planet: 'sampel-sampel', moon: 'pinser-botter-sampel-sampel' };
-const pair = (identity: VaultIdentity) => JSON.stringify([identity.planet, identity.moon]);
-const owner = (identity: VaultIdentity) => `owner-${identity.planet}`;
-const browserKey = (identity: VaultIdentity) => `browser-${identity.moon}`;
-const form = (): SecureForm => ({
-    formId: 'login-form',
-    pageId: 'page-1',
-    frameUrl: 'https://login.example/signin',
-    origin: 'https://login.example',
-    kind: 'login',
-    vaultEligible: true,
-    fields: [
-        { id: 'f0', purpose: 'username', label: 'Email', inputType: 'email', required: true },
-        { id: 'f1', purpose: 'current-password', label: 'Password', inputType: 'password', required: true },
-    ],
-});
-const secret = { username: 'private@example.test', password: 'fixture-password-secret', label: 'Personal' };
-const values = { f0: secret.username, f1: secret.password };
-
-class Store implements VaultStore {
-    records = new Map<string, EncryptedLogin[]>();
-    browserKeys = new Map([alice, sibling, other].map(identity => [pair(identity), browserKey(identity)]));
-    ownerTokens = new Map([alice, other].map(identity => [identity.planet, owner(identity)]));
-    failWrite = false;
-    async verify(identity: VaultIdentity, proof: VaultProof) {
-        const expected =
-            proof.kind === 'browser' ? this.browserKeys.get(pair(identity)) : this.ownerTokens.get(identity.planet);
-        if (!expected || expected !== (proof.kind === 'browser' ? proof.key : proof.token)) throw new Error('Denied');
-    }
-    async list(identity: VaultIdentity, proof: VaultProof) {
-        await this.verify(identity, proof);
-        return this.records.get(pair(identity)) ?? [];
-    }
-    async put(identity: VaultIdentity, proof: VaultProof, record: EncryptedLogin, revision: number | null) {
-        await this.verify(identity, proof);
-        if (proof.kind !== 'owner' || this.failWrite) throw new Error('No writes');
-        const records = this.records.get(pair(identity)) ?? [];
-        const current = records.find(candidate => candidate.id === record.id);
-        if ((current?.revision ?? null) !== revision) throw new Error('Conflict');
-        this.records.set(pair(identity), [...records.filter(candidate => candidate.id !== record.id), record]);
-    }
-    async delete(identity: VaultIdentity, proof: VaultProof, id: string, revision: number) {
-        await this.verify(identity, proof);
-        if (proof.kind !== 'owner') throw new Error('Denied');
-        const records = this.records.get(pair(identity)) ?? [];
-        if (!records.some(record => record.id === id && record.revision === revision)) throw new Error('Conflict');
-        this.records.set(
-            pair(identity),
-            records.filter(record => record.id !== id)
-        );
-    }
-}
-
-function fixture() {
-    let now = Date.now();
-    const store = new Store();
-    const cipher = new VaultCipher(root, 'primary');
-    const registry = new InMemoryHandleRegistry({ releaseSteelSession: async () => {} });
-    let page: SecureForm | null = form();
-    let rejectFill = false;
-    let beforeFill = async () => {};
-    const fills: { sessionId: string; values: Record<string, string> }[] = [];
-    const vault = new BrowserVault({
-        cipher,
-        store,
-        registry,
-        now: () => now,
-        browser: {
-            discover: async () => page,
-            fill: async (sessionId, target, submittedValues, submit) => {
-                await beforeFill();
-                if (rejectFill || !page || target.formId !== page.formId) throw new Error('Form changed');
-                fills.push({ sessionId, values: submittedValues });
-                return { submitted: submit };
-            },
-        },
-    });
-    const session = async (identity = alice, key = store.browserKeys.get(pair(identity))!) => {
-        const record = await registry.create({
-            principal: principalFromCredential(key),
-            steelSessionId: randomUUID(),
-            expiresAt: now + 1_800_000,
-        });
-        expect(await vault.bindSession(record, identity, key)).toBe(true);
-        return record;
-    };
-    const handoff = async (record: Awaited<ReturnType<typeof session>>, identity = alice, token = owner(identity)) => {
-        const handoffId = randomBytes(32).toString('base64url');
-        expect(await vault.prepare(record.steelSessionId, handoffId, formTarget(page!), now + 300_000)).toEqual({
-            available: true,
-            ...identity,
-        });
-        const authorization = await vault.authorize(handoffId, identity.planet, token);
-        return { handoffId, ...authorization };
-    };
-    const seed = (identity = alice, data = secret) => {
-        const record = cipher.encrypt(
-            { ...identity, id: randomUUID(), origin: form().origin, revision: 1, createdAt: now, updatedAt: now },
-            data
-        );
-        store.records.set(pair(identity), [...(store.records.get(pair(identity)) ?? []), record]);
-        return record;
-    };
-    return {
-        vault,
-        store,
-        cipher,
-        registry,
-        fills,
-        session,
-        handoff,
-        seed,
-        page: (next: SecureForm | null) => {
-            page = next;
-        },
-        rejectFill: () => {
-            rejectFill = true;
-        },
-        beforeFill: (action: () => Promise<void>) => {
-            beforeFill = action;
-        },
-        advance: (ms: number) => {
-            now += ms;
-        },
-    };
-}
+import { formTarget } from '../../src/core/vault/types.js';
+import { alice, browserKey, fixture, form, other, owner, pair, secret, sibling, values } from '../helpers/vault.js';
 
 describe('vault cipher', () => {
     it('encrypts with fresh nonces and authenticates every scope and metadata field', () => {
@@ -149,16 +12,18 @@ describe('vault cipher', () => {
         const record = f.seed();
         expect(f.cipher.decrypt(alice, record)).toEqual(secret);
         expect(JSON.stringify(record)).not.toContain(secret.password);
-        expect(JSON.stringify(record)).not.toContain(secret.username);
+        expect(record).toHaveProperty('username', secret.username);
         expect(f.seed().nonce).not.toBe(record.nonce);
         for (const mutation of [
             { planet: other.planet },
             { moon: sibling.moon },
             { id: randomUUID() },
             { origin: 'https://elsewhere.example' },
-            { revision: 2 },
             { createdAt: 1 },
-            { updatedAt: 2 },
+            { label: 'Other' },
+            { username: 'other@example.com' },
+            { username: undefined },
+            { factor: Buffer.alloc(32, 10).toString('base64') },
             { keyId: 'different' },
             { tag: Buffer.alloc(16).toString('base64') },
             { nonce: Buffer.alloc(12).toString('base64') },
@@ -180,11 +45,76 @@ describe('planet-backed browser vault', () => {
         f = fixture();
     });
 
+    it('discovers metadata without decrypting and asks before using an unapproved credential', async () => {
+        const saved = f.seed();
+        f.store.records.set(pair(alice), [{ ...saved, permission: 'ask' }]);
+        const record = await f.session();
+        const before = f.cipher.decrypt;
+        f.cipher.decrypt = () => {
+            throw new Error('Discovery must not decrypt');
+        };
+        expect(await f.vault.discover(record)).toEqual([
+            {
+                id: saved.id,
+                origin: saved.origin,
+                revision: saved.revision,
+                updatedAt: saved.updatedAt,
+                label: 'Personal',
+                username: secret.username,
+                permission: 'ask',
+            },
+        ]);
+        expect(await f.vault.login(record, undefined, { id: saved.id, revision: saved.revision })).toEqual({
+            status: 'approval_required',
+        });
+        expect(f.fills).toEqual([]);
+        f.cipher.decrypt = before;
+    });
+
+    it('allows one owner fill without granting subsequent automatic use', async () => {
+        const saved = f.seed();
+        f.store.records.set(pair(alice), [{ ...saved, permission: 'ask' }]);
+        const record = await f.session();
+        const auth = await f.handoff(record);
+        await f.vault.fill({ ...auth, submit: true, use: { id: saved.id, revision: 1 } });
+        expect(f.fills).toHaveLength(1);
+        expect(await f.vault.login(await f.session())).toEqual({ status: 'approval_required' });
+    });
+
+    it('saves automatic use only on explicit consent and honors revocation', async () => {
+        const record = await f.session();
+        const auth = await f.handoff(record);
+        await f.vault.fill({ ...auth, values, submit: true, save: { permission: 'ask' } });
+        const saved = f.store.records.get(pair(alice))![0]!;
+        expect(saved.permission).toBe('ask');
+        await f.vault.setPermission(alice, owner(alice), { id: saved.id, revision: 1 }, 'allow');
+        expect(await f.vault.login(await f.session())).toMatchObject({ status: 'filled' });
+        await f.vault.setPermission(alice, owner(alice), { id: saved.id, revision: 2 }, 'ask');
+        expect(await f.vault.login(await f.session())).toEqual({ status: 'approval_required' });
+    });
+
+    it('protects known values in model-visible text independently of DOM attributes', async () => {
+        f.seed();
+        const record = await f.session();
+        await f.vault.login(record);
+        const result = {
+            content: [{ type: 'text', text: `Accessible label ${secret.password}` }],
+            structuredContent: {
+                url: `https://login.example/${encodeURIComponent(secret.password)}`,
+                title: Buffer.from(secret.password).toString('base64'),
+            },
+        };
+        expect(JSON.stringify(f.vault.redact(record.principal, result))).not.toContain(secret.password);
+        expect(f.vault.redact(record.principal, result).structuredContent.title).toBe('[redacted]');
+        expect(f.vault.hasProtectedValues(record.principal)).toBe(true);
+        expect(f.vault.redact('another-principal', result)).toEqual(result);
+    });
+
     it('saves only ciphertext, privately fills it in a fresh session, and blocks automatic retry', async () => {
         const first = await f.session();
         const auth = await f.handoff(first);
         expect(auth.accounts).toEqual([]);
-        const saved = await f.vault.fill({ ...auth, values, submit: true, save: {} });
+        const saved = await f.vault.fill({ ...auth, values, submit: true, save: { permission: 'allow' } });
         expect(saved).toEqual({ ok: true, submitted: true, saveStatus: 'saved' });
         expect(await f.vault.login(first)).toEqual({ status: 'needs_input' });
         const second = await f.session();
@@ -199,7 +129,9 @@ describe('planet-backed browser vault', () => {
     it('keeps two moons and two planets isolated and rejects forged routing hints', async () => {
         f.seed();
         const record = await f.session();
-        expect(await f.vault.bindSession(record, sibling, browserKey(alice))).toBe(false);
+        await expect(f.vault.bindSession(record, sibling, browserKey(alice))).rejects.toThrow(
+            'verification is unavailable'
+        );
         for (const identity of [sibling, other]) {
             const unrelated = await f.session(identity);
             expect(await f.vault.login(unrelated)).toEqual({ status: 'no_match' });
@@ -322,6 +254,19 @@ describe('planet-backed browser vault', () => {
         await expect(
             f.vault.fill({ ...canceled, values: { f1: secret.password }, submit: true, save: { label: 'Personal' } })
         ).rejects.toThrow('already used');
+    });
+
+    it('refuses malformed internationalized origins before preparing a save', async () => {
+        const record = await f.session();
+        const invalid = { ...form(), origin: 'https://xn--', frameUrl: 'https://xn--/login' };
+        f.page(invalid);
+        const handoffId = randomBytes(32).toString('base64url');
+        expect(
+            await f.vault.prepare(record.steelSessionId, handoffId, formTarget(invalid), Date.now() + 60_000)
+        ).toEqual({ available: false });
+        await expect(f.vault.authorize(handoffId, alice.planet, owner(alice))).rejects.toThrow('invalid');
+        expect(f.store.records.size).toBe(0);
+        expect(f.fills).toEqual([]);
     });
 
     it('reports save failure separately from fill success and rejects unsafe or OTP forms', async () => {
