@@ -31,7 +31,7 @@ const authenticationButton = /^(?:log\s*in|sign\s*in|continue|next|verify|submit
 /** No field values or capability URLs are sent as page evidence. */
 export function runEvidence(snapshot: PageSnapshot): string {
     return snapshot.nodes
-        .filter(node => !node.sensitive)
+        .filter(node => !node.requiresSecureEntry)
         .slice(0, 160)
         .map(node => {
             const state = [
@@ -64,7 +64,7 @@ export function runCandidates(
 ): Map<string, Candidate> {
     const candidates = new Map<string, Candidate>();
     for (const node of snapshot.nodes) {
-        if (!node.ref || !node.interactive || node.sensitive || candidates.size >= 220) continue;
+        if (!node.ref || !node.interactive || node.requiresSecureEntry || candidates.size >= 220) continue;
         const role = node.role.toLowerCase();
         if (node.properties?.disabled === true) continue;
         if (role === 'tab' && node.properties?.selected === true) continue;
@@ -178,11 +178,7 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                             break;
                         }
                         snapshot = await page.snapshot({ interactiveOnly: false });
-                        const hasSensitiveFields = snapshot.nodes.some(node => node.sensitive && node.ref);
-                        if (hasSensitiveFields && !continuation) {
-                            status = 'needs_handoff';
-                            break;
-                        }
+                        const hasSensitiveFields = snapshot.nodes.some(node => node.requiresSecureEntry && node.ref);
                         await check();
                         const evidence = runEvidence(snapshot);
                         const candidates = runCandidates(
@@ -191,6 +187,20 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                             continuation?.kind === 'login',
                             continuation?.kind === 'details'
                         );
+                        const secureEntryPending =
+                            !continuation && (block.verdict?.block.kind === 'login_wall' || hasSensitiveFields);
+                        if (secureEntryPending) {
+                            if (![...candidates.values()].some(candidate => candidate.action?.action === 'type')) {
+                                status = 'needs_handoff';
+                                break;
+                            }
+                            // Supplied contact details can be entered alongside payment fields.
+                            // While secrets are pending, do not offer navigation or submit clicks.
+                            for (const [id, candidate] of candidates) {
+                                if (candidate.action && !['type', 'scroll'].includes(candidate.action.action))
+                                    candidates.delete(id);
+                            }
+                        }
                         const criteria = Object.fromEntries(
                             [...candidates].map(([id, candidate]) => [id, candidate.label])
                         );
@@ -246,7 +256,11 @@ export function registerRun(host: ToolHost, deps: ServerDeps): void {
                             break;
                         }
                         if (answers.action.choice === 'done') {
-                            status = answers.goal_done.noul >= 0.85 && !hasSensitiveFields ? 'done' : 'needs_review';
+                            status = secureEntryPending
+                                ? 'needs_handoff'
+                                : answers.goal_done.noul >= 0.85 && !hasSensitiveFields
+                                  ? 'done'
+                                  : 'needs_review';
                             break;
                         }
                         if (answers.action.choice === 'needs_input') {

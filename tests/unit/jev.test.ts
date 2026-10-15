@@ -14,6 +14,7 @@ function node(overrides: Partial<SnapshotNode> = {}): SnapshotNode {
         inViewport: true,
         interactive: true,
         sensitive: false,
+        requiresSecureEntry: false,
         ...overrides,
     };
 }
@@ -67,7 +68,10 @@ describe('Jev configuration and action space', () => {
     });
 
     it('offers supplied text only to matching non-sensitive fields and never presses Enter', () => {
-        const page = snapshot([node(), node({ ref: '@e2', name: 'OTP', sensitive: true, value: 'secret-code' })]);
+        const page = snapshot([
+            node(),
+            node({ ref: '@e2', name: 'OTP', sensitive: true, requiresSecureEntry: true, value: 'secret-code' }),
+        ]);
         const actions = [
             ...runCandidates(page, [
                 { field: 'search', value: 'movie times' },

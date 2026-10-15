@@ -4,7 +4,13 @@
 import safeRegex from 'safe-regex2';
 import { type StaleRefReason, SteelToolError, staleRefError } from './errors.js';
 import type { CdpSession } from './steel/cdp.js';
-import { defangMarkdownLinks, isSensitiveField, redactSensitiveValue, stripInvisible } from './untrusted.js';
+import {
+    defangMarkdownLinks,
+    isSensitiveField,
+    redactSensitiveValue,
+    requiresSecureEntry,
+    stripInvisible,
+} from './untrusted.js';
 
 /** The computed styles the pipeline needs to decide whether a node can be targeted. */
 export const COMPUTED_STYLES = [
@@ -41,6 +47,8 @@ export interface SnapshotNode {
     interactive: boolean;
     /** True for a form control whose value must never be echoed back, such as a password input. */
     sensitive: boolean;
+    /** True when the owner must enter this field through a secure handoff. */
+    requiresSecureEntry: boolean;
     properties?: Record<string, string | number | boolean> | undefined;
     /** Element centre in CSS pixels, used to dispatch pointer events. */
     center?: { x: number; y: number } | undefined;
@@ -82,6 +90,7 @@ export interface ResolvedRef {
     role: string;
     name: string;
     snapshotId: string;
+    formControl?: import('./steel/selected-form.js').SelectedFormControl | undefined;
     center?: { x: number; y: number } | undefined;
 }
 
@@ -666,6 +675,7 @@ export class PageState {
         // A username beside a password can have no name/autocomplete at all.
         // Protect text controls in the same form, including form= associations.
         const credentialNeighbours = new Set<number>();
+        const formOwners = new Map<number, number | undefined>();
         for (const document of documents) {
             const formsById = new Map(
                 [...document.facts]
@@ -686,11 +696,17 @@ export class PageState {
             const passwordForms = new Set(
                 [...document.facts]
                     .filter(
-                        ([, facts]) => facts.tagName === 'INPUT' && facts.attributes.type?.toLowerCase() === 'password'
+                        ([, facts]) =>
+                            facts.tagName === 'INPUT' &&
+                            facts.attributes.type?.toLowerCase() === 'password' &&
+                            !/cc-|cvv|cvc|csc|card/i.test(
+                                [facts.attributes.autocomplete, facts.attributes.name, facts.attributes.id].join(' ')
+                            )
                     )
                     .map(([id]) => formOf(id))
             );
             for (const [id, facts] of document.facts) {
+                if (['INPUT', 'TEXTAREA', 'SELECT'].includes(facts.tagName)) formOwners.set(id, formOf(id));
                 if (
                     facts.tagName === 'INPUT' &&
                     ['', 'text', 'email', 'tel'].includes(facts.attributes.type?.toLowerCase() ?? '') &&
@@ -835,6 +851,27 @@ export class PageState {
                     snapshotId,
                     lastSeenSnapshotId: snapshotId,
                     center,
+                    formControl:
+                        nodeFacts && ['INPUT', 'TEXTAREA', 'SELECT'].includes(nodeFacts.tagName) && frameLoaderId
+                            ? {
+                                  backendNodeId,
+                                  frameId,
+                                  loaderId: frameLoaderId,
+                                  tagName: nodeFacts.tagName as 'INPUT' | 'TEXTAREA' | 'SELECT',
+                                  type:
+                                      nodeFacts.tagName === 'SELECT'
+                                          ? 'multiple' in nodeFacts.attributes
+                                              ? 'select-multiple'
+                                              : 'select-one'
+                                          : nodeFacts.tagName === 'TEXTAREA'
+                                            ? 'textarea'
+                                            : nodeFacts.attributes.type?.toLowerCase() || 'text',
+                                  name: nodeFacts.attributes.name || '',
+                                  id: nodeFacts.attributes.id || '',
+                                  label: accessibleName,
+                                  formBackendNodeId: formOwners.get(backendNodeId),
+                              }
+                            : undefined,
                 });
             }
 
@@ -844,7 +881,7 @@ export class PageState {
             const sensitive =
                 nodeFacts === undefined
                     ? rawValue !== undefined
-                    : nodeFacts.attributes['data-tlon-sensitive'] === 'true' ||
+                    : nodeFacts.attributes['data-steel-private'] === 'true' ||
                       credentialNeighbours.has(backendNodeId ?? -1) ||
                       isSensitiveField({
                           tagName: nodeFacts.tagName,
@@ -858,10 +895,24 @@ export class PageState {
 
             const value =
                 rawValue === undefined ? undefined : sensitive ? redactSensitiveValue(rawValue) : cleanText(rawValue);
+            const secureEntry =
+                nodeFacts === undefined
+                    ? rawValue !== undefined
+                    : credentialNeighbours.has(backendNodeId ?? -1) ||
+                      requiresSecureEntry({
+                          tagName: nodeFacts.tagName,
+                          type: nodeFacts.attributes.type,
+                          name: nodeFacts.attributes.name,
+                          id: nodeFacts.attributes.id,
+                          autocomplete: nodeFacts.attributes.autocomplete,
+                          label: name,
+                          maxLength: nodeFacts.attributes.maxlength,
+                      });
 
             const properties: Record<string, string | number | boolean> = {};
             for (const property of axNode.properties ?? []) {
                 if (!USEFUL_PROPERTIES.has(property.name)) continue;
+                if (sensitive && ['checked', 'selected'].includes(property.name)) continue;
                 const propertyValue = property.value?.value;
                 if (propertyValue === undefined || propertyValue === false || propertyValue === 'false') continue;
                 properties[property.name] = propertyValue as string | number | boolean;
@@ -899,6 +950,7 @@ export class PageState {
                     inViewport,
                     interactive: ref !== undefined,
                     sensitive,
+                    requiresSecureEntry: secureEntry,
                     properties: Object.keys(properties).length > 0 ? properties : undefined,
                     center,
                 });
@@ -966,6 +1018,42 @@ export class PageState {
             });
         }
         return record;
+    }
+
+    /** Names select a unique control from the observed snapshot, never an unobserved page search. */
+    selectFormFields(
+        selectors: import('./steel/selected-form.js').FormFieldSelector[]
+    ): import('./steel/selected-form.js').SelectedFormControl[] {
+        const fields = selectors.map(selector => {
+            let ref: string;
+            if (typeof selector === 'string') ref = selector;
+            else {
+                const matches =
+                    this.latest?.nodes.filter(node => {
+                        const field = node.ref && this.recordByRef.get(node.ref)?.formControl;
+                        return (
+                            field &&
+                            ('name' in selector ? field.name === selector.name : field.label === selector.label)
+                        );
+                    }) || [];
+                if (matches.length !== 1 || !matches[0]?.ref)
+                    throw new SteelToolError(
+                        'The field name or label does not identify one visible control. Take a fresh snapshot and use its @eN reference.',
+                        { code: 'invalid_argument' }
+                    );
+                ref = matches[0].ref;
+            }
+            const field = this.resolveRef(ref).formControl;
+            if (!field)
+                throw new SteelToolError(
+                    'The selected reference is not a supported form control. Take a fresh snapshot.',
+                    { code: 'invalid_argument' }
+                );
+            return field;
+        });
+        if (new Set(fields.map(field => `${field.frameId}:${field.backendNodeId}`)).size !== fields.length)
+            throw new SteelToolError('Select each form control only once.', { code: 'invalid_argument' });
+        return fields;
     }
 
     /**

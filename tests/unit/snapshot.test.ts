@@ -78,6 +78,73 @@ const FRAME_FIELD: FixtureNode = {
     bounds: [10, 20, 150, 20],
 };
 
+describe('selected form identities', () => {
+    const member: FixtureNode = { ...FRAME_FIELD, attributes: { name: 'member' }, name: 'Member' };
+    const form = (children: FixtureNode[]): FixtureNode => ({ tag: 'FORM', backendNodeId: 40, children });
+
+    it('resolves refs, names, and labels to the same document-bound control', async () => {
+        const state = new PageState();
+        const { session } = fixtureSession(page([form([member])]));
+        const snapshot = await state.capture(session, {});
+        const ref = snapshot.nodes.find(node => node.name === 'Member')!.ref!;
+        const selected = state.selectFormFields([ref]);
+        expect(selected).toEqual([
+            {
+                backendNodeId: 100,
+                frameId: 'main-frame',
+                loaderId: 'loader-1',
+                tagName: 'INPUT',
+                type: 'text',
+                name: 'member',
+                id: '',
+                label: 'Member',
+                formBackendNodeId: 40,
+            },
+        ]);
+        expect(state.selectFormFields([{ name: 'member' }])).toEqual(selected);
+        expect(state.selectFormFields([{ label: 'Member' }])).toEqual(selected);
+        expect(() => state.selectFormFields([ref, { name: 'member' }])).toThrow('only once');
+    });
+
+    it('rejects duplicate names, unavailable labels, and non-control refs', async () => {
+        const state = new PageState();
+        const { session } = fixtureSession(page([form([member, { ...member, backendNodeId: 101 }]), BUTTON]));
+        const snapshot = await state.capture(session, {});
+        expect(() => state.selectFormFields([{ name: 'member' }])).toThrow('one visible control');
+        expect(() => state.selectFormFields([{ label: 'Missing' }])).toThrow('one visible control');
+        expect(() => state.selectFormFields([snapshot.nodes.find(node => node.role === 'button')!.ref!])).toThrow(
+            'not a supported form control'
+        );
+    });
+
+    it('redacts explicitly private generic values, descendants, and checkbox state', async () => {
+        const { session } = fixtureSession(
+            page([
+                form([
+                    {
+                        ...member,
+                        attributes: { name: 'member', 'data-steel-private': 'true' },
+                        inputValue: 'private-member',
+                        children: [{ tag: '#text', backendNodeId: 200, role: 'StaticText', name: 'private-member' }],
+                    },
+                    {
+                        ...member,
+                        backendNodeId: 101,
+                        role: 'checkbox',
+                        name: 'Private preference',
+                        attributes: { type: 'checkbox', 'data-steel-private': 'true' },
+                        properties: { checked: true },
+                    },
+                ]),
+            ])
+        );
+        const snapshot = await new PageState().capture(session, { interactiveOnly: false });
+        expect(snapshot.text).not.toContain('private-member');
+        expect(snapshot.nodes.find(node => node.role === 'checkbox')?.properties?.checked).toBeUndefined();
+        expect(snapshot.nodes.find(node => node.role === 'textbox')?.sensitive).toBe(true);
+    });
+});
+
 describe('PageState.capture — which nodes earn a ref', () => {
     it('gives a ref to a visible node that receives pointer events', async () => {
         const { session } = fixtureSession(page([BUTTON]));
@@ -654,7 +721,7 @@ describe('PageState.capture — untrusted content handling', () => {
                     backendNodeId: 20,
                     role: 'textbox',
                     name: 'Account',
-                    attributes: { type: 'text', 'data-tlon-sensitive': 'true' },
+                    attributes: { type: 'text', 'data-steel-private': 'true' },
                     inputValue: 'private-account',
                     bounds: [0, 0, 100, 20],
                 },
@@ -798,6 +865,7 @@ describe('renderSnapshot', () => {
                 name: '',
                 nameInferred: false,
                 sensitive: false,
+                requiresSecureEntry: false,
                 backendNodeId: 1,
                 depth: 0,
                 inViewport: true,
@@ -808,6 +876,7 @@ describe('renderSnapshot', () => {
                 name: 'Go',
                 nameInferred: false,
                 sensitive: false,
+                requiresSecureEntry: false,
                 backendNodeId: 2,
                 depth: 1,
                 inViewport: true,
@@ -828,6 +897,7 @@ describe('findInSnapshot', () => {
             name: 'Save changes',
             nameInferred: false,
             sensitive: false,
+            requiresSecureEntry: false,
             backendNodeId: 1,
             depth: 1,
             inViewport: true,
@@ -839,6 +909,7 @@ describe('findInSnapshot', () => {
             name: 'Save as draft',
             nameInferred: false,
             sensitive: false,
+            requiresSecureEntry: false,
             backendNodeId: 2,
             depth: 1,
             inViewport: true,
@@ -850,6 +921,7 @@ describe('findInSnapshot', () => {
             name: 'Settings',
             nameInferred: false,
             sensitive: false,
+            requiresSecureEntry: false,
             backendNodeId: 3,
             depth: 0,
             inViewport: true,
@@ -881,6 +953,7 @@ describe('findInSnapshot', () => {
                 name: 'Email',
                 nameInferred: false,
                 sensitive: false,
+                requiresSecureEntry: false,
                 backendNodeId: 9,
                 depth: 1,
                 inViewport: true,
@@ -891,6 +964,7 @@ describe('findInSnapshot', () => {
                 name: 'Email',
                 nameInferred: false,
                 sensitive: false,
+                requiresSecureEntry: false,
                 backendNodeId: 10,
                 depth: 1,
                 inViewport: true,
