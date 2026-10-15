@@ -1,8 +1,9 @@
-// ABOUTME: The handle registry: mints opaque session handles, re-authorises them against the
+// ABOUTME: The handle registry: reserves readable session handles, re-authorises them against the
 // ABOUTME: caller's own principal on every call, releases idempotently and reaps orphans.
 import { createHash, randomBytes } from 'node:crypto';
 import type { MitigationState } from './errors.js';
 import { SteelToolError } from './errors.js';
+import { HANDLE_ALLOCATION_ATTEMPTS, mintHandle } from './session-name.js';
 
 /** Why this registry successfully finalized a browser session. */
 export type ReleasePath = 'explicit' | 'stream_close' | 'idle' | 'hard_expiry';
@@ -16,7 +17,7 @@ export interface HumanControlLease {
 }
 
 export interface HandleRecord {
-    /** Opaque, CSPRNG-derived, never a capability on its own. */
+    /** Random adjective-color-animal name, never a capability on its own. */
     handle: string;
     /** The Steel session this handle points at. */
     steelSessionId: string;
@@ -117,6 +118,8 @@ export interface HandleRegistry {
 }
 
 export interface RegistryDeps {
+    /** Supplies name candidates; the registry enforces uniqueness. */
+    generateHandle?: (() => string) | undefined;
     /**
      * Called exactly once per handle, on whichever release path fires first.
      *
@@ -164,9 +167,8 @@ export function handleExpiredError(handle: string): SteelToolError {
     );
 }
 
-/** Mints an opaque handle. Shared by every backend so entropy and prefix never diverge. */
-export function mintHandle(): string {
-    return `sess_${randomBytes(16).toString('base64url')}`;
+export function handleAllocationError(): SteelToolError {
+    return new SteelToolError('Browser session names are busy. Retry this request.', { code: 'rate_limited' });
 }
 
 export function mintControlToken(): string {
@@ -210,9 +212,19 @@ export class InMemoryHandleRegistry implements HandleRegistry {
     }
 
     async create(input: CreateHandleInput): Promise<HandleRecord> {
+        let handle: string | undefined;
+        for (let attempt = 0; attempt < HANDLE_ALLOCATION_ATTEMPTS; attempt++) {
+            const candidate = (this.deps.generateHandle ?? mintHandle)();
+            if (!this.records.has(candidate)) {
+                handle = candidate;
+                break;
+            }
+        }
+        if (handle === undefined) throw handleAllocationError();
+        // No await separates checking the name from reserving it in this process.
         const now = Date.now();
         const record: HandleRecord = {
-            handle: mintHandle(),
+            handle,
             steelSessionId: input.steelSessionId,
             principal: input.principal,
             createdAt: now,

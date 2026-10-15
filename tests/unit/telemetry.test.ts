@@ -57,7 +57,7 @@ describe('browser trace projection', () => {
                     structuredContent: {
                         status: 'timeout',
                         error_code: 'timeout',
-                        session_id: 'sess_PRIVATE',
+                        session_id: 'private-blue-fox',
                         steps: [{ attempted: true, executed: false, description: 'SECRET', target: 'SECRET' }],
                         usage: { calls: 1, input_tokens: 100, output_tokens: 5, cost_usd: 0.001, cost_reported: true },
                     },

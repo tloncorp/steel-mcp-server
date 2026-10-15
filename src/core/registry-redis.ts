@@ -6,16 +6,26 @@ import {
     type HandleRecord,
     type HandleRegistry,
     type HumanControlLease,
+    handleAllocationError,
     handleExpiredError,
     handleNotFoundError,
     humanControlError,
     mintControlToken,
-    mintHandle,
     type ReapOptions,
     type RegistryDeps,
     type ReleasePath,
     sessionReleasingError,
 } from './registry.js';
+import { HANDLE_ALLOCATION_ATTEMPTS, mintHandle } from './session-name.js';
+
+export interface RedisHandleKeys {
+    record: string;
+    fields: [string, string, string, string];
+    principalIndex: string;
+    liveIndex: string;
+    handle: string;
+    member: string;
+}
 
 /**
  * The Redis commands this registry issues, and nothing more.
@@ -24,6 +34,10 @@ import {
  * in-memory store: no server, no client library, no network in the unit suite.
  */
 export interface RedisCommands {
+    /** Atomically reserves a vacant name, clears stray fields, and indexes its record. */
+    claimHandle(keys: RedisHandleKeys, value: string, ttlMs: number): Promise<boolean>;
+    /** Atomically cleans a matching record and its indexes, or only stale index entries. */
+    forgetHandle(keys: RedisHandleKeys, expected: string | null, removeRecord: boolean): Promise<boolean>;
     get(key: string): Promise<string | null>;
     /**
      * Writes a value with a millisecond time-to-live.
@@ -134,7 +148,7 @@ export class RedisHandleRegistry implements HandleRegistry {
      *
      * The first three are each owned by one operation. Human/release ownership shares `control`,
      * where SET-NX and compare-and-set provide the atomic fencing a plain record rewrite cannot.
-     * A handle is base64url, so no suffix can collide with another handle's record key.
+     * A handle contains only letters and hyphens, so a colon suffix cannot name another handle.
      */
     private usedKey(handle: string): string {
         return `${this.recordKey(handle)}:used`;
@@ -221,41 +235,40 @@ export class RedisHandleRegistry implements HandleRegistry {
         };
     }
 
-    /**
-     * Writes the immutable record. Called once per handle, by `create` and nothing else.
-     *
-     * That it is written exactly once is what makes a released handle unresurrectable: no later
-     * operation can put the record back after a `release` has deleted it.
-     */
-    private async write(record: StoredRecord): Promise<void> {
-        // Never below the grace period: a handle that is already long expired still needs a record
-        // to release, and Redis rejects a non-positive expiry outright.
-        const ttlMs = Math.max(record.expiresAt - this.now().getTime() + RECORD_GRACE_MS, RECORD_GRACE_MS);
-        await this.commands.set(this.recordKey(record.handle), JSON.stringify(record), ttlMs);
+    private handleKeys(principal: string, handle: string): RedisHandleKeys {
+        return {
+            record: this.recordKey(handle),
+            fields: [this.usedKey(handle), this.awaitKey(handle), this.roundsKey(handle), this.controlKey(handle)],
+            principalIndex: this.principalKey(principal),
+            liveIndex: this.liveKey,
+            handle,
+            member: `${principal}:${handle}`,
+        };
     }
 
     /**
-     * Removes a record, all four mutable-field keys and both index entries.
-     *
-     * Returns whether this caller was the one that removed the record. Two replicas sweeping at
-     * once both see the handle, so `del` of the record deciding the winner is what keeps the
-     * release counters honest without a distributed lock — which is also why it goes first.
+     * Removes the expected session atomically before making its name available again.
+     * A stale list or reaper cannot erase a session that reuses the name.
      */
-    private async forget(principal: string, handle: string): Promise<boolean> {
-        const removed = await this.commands.del(this.recordKey(handle));
-        await this.commands.del(this.usedKey(handle));
-        await this.commands.del(this.awaitKey(handle));
-        await this.commands.del(this.roundsKey(handle));
-        await this.commands.del(this.controlKey(handle));
-        await this.commands.srem(this.principalKey(principal), handle);
-        await this.commands.srem(this.liveKey, `${principal}:${handle}`);
-        return removed > 0;
+    private async forget(principal: string, handle: string, expected?: HandleRecord): Promise<boolean> {
+        const raw = await this.commands.get(this.recordKey(handle));
+        let current: StoredRecord | undefined;
+        try {
+            current = raw === null ? undefined : (JSON.parse(raw) as StoredRecord);
+        } catch {
+            // Unreadable records have no usable session identity and are swept with their index.
+        }
+        if (expected && (current?.steelSessionId !== expected.steelSessionId || current.principal !== principal)) {
+            return false;
+        }
+        if (!expected && current?.principal === principal) return false;
+        return this.commands.forgetHandle(this.handleKeys(principal, handle), raw, !current || !!expected);
     }
 
     async create(input: CreateHandleInput): Promise<HandleRecord> {
         const now = this.now().getTime();
         const stored: StoredRecord = {
-            handle: mintHandle(),
+            handle: '',
             steelSessionId: input.steelSessionId,
             principal: input.principal,
             createdAt: now,
@@ -267,14 +280,20 @@ export class RedisHandleRegistry implements HandleRegistry {
             debugUrl: input.debugUrl,
             mitigation: input.mitigation ?? {},
         };
-        // The record is written before it is indexed, so an index entry never names a handle that
-        // cannot be read back and released.
-        await this.write(stored);
-        await this.commands.sadd(this.principalKey(stored.principal), stored.handle);
-        await this.commands.sadd(this.liveKey, `${stored.principal}:${stored.handle}`);
-        // Neither mutable key is written: at creation the last use is `createdAt` and no handoff has
-        // been offered, which is exactly what `read` reports for an absent key.
-        return { ...stored, lastUsedAt: now, handoffRounds: 0 };
+        for (let attempt = 0; attempt < HANDLE_ALLOCATION_ATTEMPTS; attempt++) {
+            stored.handle = (this.deps.generateHandle ?? mintHandle)();
+            const ttlMs = Math.max(input.expiresAt - this.now().getTime() + RECORD_GRACE_MS, RECORD_GRACE_MS);
+            if (
+                await this.commands.claimHandle(
+                    this.handleKeys(stored.principal, stored.handle),
+                    JSON.stringify(stored),
+                    ttlMs
+                )
+            ) {
+                return { ...stored, lastUsedAt: now, handoffRounds: 0 };
+            }
+        }
+        throw handleAllocationError();
     }
 
     async resolve(handle: string, principal: string): Promise<HandleRecord> {
@@ -317,17 +336,23 @@ export class RedisHandleRegistry implements HandleRegistry {
         return record;
     }
 
+    /** A delayed claim may refer to a name another session has already reused. */
+    private async claimControl(record: HandleRecord, value: string, ttlMs: number): Promise<boolean> {
+        const key = this.controlKey(record.handle);
+        if (!(await this.commands.setIfAbsent(key, value, ttlMs))) return false;
+        const current = await this.read(record.handle);
+        if (current?.steelSessionId === record.steelSessionId && current.principal === record.principal) return true;
+        await this.commands.compareDelete(key, value);
+        return false;
+    }
+
     async acquireHumanControl(handle: string, principal: string, leaseMs: number) {
         const record = await this.resolve(handle, principal);
         const now = this.now().getTime();
         if (record.releasing) throw sessionReleasingError();
         const lease = { token: mintControlToken(), leaseUntil: Math.min(now + leaseMs, record.expiresAt) };
         const raw = JSON.stringify(lease);
-        const claimed = await this.commands.setIfAbsent(
-            this.controlKey(handle),
-            raw,
-            Math.max(1, lease.leaseUntil - now)
-        );
+        const claimed = await this.claimControl(record, raw, Math.max(1, lease.leaseUntil - now));
         if (!claimed) {
             const current = await this.read(handle);
             if (current?.releasing) throw sessionReleasingError();
@@ -411,7 +436,7 @@ export class RedisHandleRegistry implements HandleRegistry {
             throw humanControlError(record.humanControl.leaseUntil);
         }
         const marker = JSON.stringify({ releasing: true, token: mintControlToken() });
-        if (!(await this.commands.setIfAbsent(this.controlKey(handle), marker, 120_000))) {
+        if (!(await this.claimControl(record, marker, 120_000))) {
             const current = await this.read(handle);
             if (current?.humanControl) throw humanControlError(current.humanControl.leaseUntil);
             return null;
@@ -419,7 +444,7 @@ export class RedisHandleRegistry implements HandleRegistry {
         try {
             await this.deps.releaseSteelSession(record.steelSessionId, record.principal);
             await this.releaseLedgers(record);
-            if (await this.forget(principal, handle)) this.finalized(path);
+            if (await this.forget(principal, handle, record)) this.finalized(path);
         } catch (error) {
             await this.commands.compareDelete(this.controlKey(handle), marker);
             throw error;
@@ -480,8 +505,8 @@ export class RedisHandleRegistry implements HandleRegistry {
     }
 
     async reserveSessionSlot(principal: string, owner: string, expiresAt: number, limit: number): Promise<boolean> {
-        // Include records created before capacity reservations were introduced. A stale release read
-        // can conservatively hold a slot until hard expiry, but can never admit an extra browser.
+        // Include live records in the capacity ledger. A stale release read can conservatively
+        // hold a slot until hard expiry, but can never admit an extra browser.
         const live = await this.list(principal);
         return this.updateSessionSlots(principal, slots => {
             const now = this.now().getTime();
@@ -520,7 +545,7 @@ export class RedisHandleRegistry implements HandleRegistry {
             const handle = member.slice(separator + 1);
 
             const record = await this.read(handle);
-            if (!record) {
+            if (!record || record.principal !== principal) {
                 await this.forget(principal, handle);
                 continue;
             }
@@ -533,10 +558,10 @@ export class RedisHandleRegistry implements HandleRegistry {
 
             const marker = JSON.stringify({ releasing: true, token: mintControlToken() });
             try {
-                if (!(await this.commands.setIfAbsent(this.controlKey(handle), marker, 120_000))) continue;
+                if (!(await this.claimControl(record, marker, 120_000))) continue;
                 await this.deps.releaseSteelSession(record.steelSessionId, record.principal);
                 await this.releaseLedgers(record);
-                if (await this.forget(record.principal, handle)) {
+                if (await this.forget(record.principal, handle, record)) {
                     this.finalized(expired ? 'hard_expiry' : 'idle');
                     reaped += 1;
                 }

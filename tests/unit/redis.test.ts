@@ -11,23 +11,29 @@ function connection(client: RecordingRedisClient, onError: (error: unknown) => v
 describe('redisConnection commands', () => {
     it('sets a value with a millisecond expiry, the only TTL unit the registry uses', async () => {
         const client = new RecordingRedisClient();
-        await connection(client).commands.set('steel-mcp:handle:sess_1', '{}', 90_000);
+        await connection(client).commands.set('steel-mcp:handle:calm-blue-fox', '{}', 90_000);
 
-        expect(client.calls).toEqual([{ command: 'set', args: ['steel-mcp:handle:sess_1', '{}', 'PX', 90_000] }]);
+        expect(client.calls).toEqual([
+            { command: 'set', args: ['steel-mcp:handle:calm-blue-fox', '{}', 'PX', 90_000] },
+        ]);
     });
 
     it('passes reads, deletes and set membership straight through', async () => {
-        const client = new RecordingRedisClient({ get: '{"handle":"sess_1"}', del: 1, smembers: ['sess_1'] });
+        const client = new RecordingRedisClient({
+            get: '{"handle":"calm-blue-fox"}',
+            del: 1,
+            smembers: ['calm-blue-fox'],
+        });
         const commands = connection(client).commands;
 
-        expect(await commands.get('key')).toBe('{"handle":"sess_1"}');
+        expect(await commands.get('key')).toBe('{"handle":"calm-blue-fox"}');
         expect(await commands.del('key')).toBe(1);
-        expect(await commands.smembers('index')).toEqual(['sess_1']);
-        await commands.sadd('index', 'sess_1');
-        await commands.srem('index', 'sess_1');
+        expect(await commands.smembers('index')).toEqual(['calm-blue-fox']);
+        await commands.sadd('index', 'calm-blue-fox');
+        await commands.srem('index', 'calm-blue-fox');
 
         expect(client.calls.map(call => call.command)).toEqual(['get', 'del', 'smembers', 'sadd', 'srem']);
-        expect(client.calls.at(-1)?.args).toEqual(['index', 'sess_1']);
+        expect(client.calls.at(-1)?.args).toEqual(['index', 'calm-blue-fox']);
     });
 
     it('reports how many keys a delete removed, which is what settles a concurrent sweep', async () => {
@@ -39,12 +45,12 @@ describe('redisConnection commands', () => {
         const client = new RecordingRedisClient({ incr: 2 });
         const commands = connection(client).commands;
 
-        expect(await commands.incr('steel-mcp:handle:sess_1:rounds')).toBe(2);
-        await commands.pexpire('steel-mcp:handle:sess_1:rounds', 90_000);
+        expect(await commands.incr('steel-mcp:handle:calm-blue-fox:rounds')).toBe(2);
+        await commands.pexpire('steel-mcp:handle:calm-blue-fox:rounds', 90_000);
 
         expect(client.calls).toEqual([
-            { command: 'incr', args: ['steel-mcp:handle:sess_1:rounds'] },
-            { command: 'pexpire', args: ['steel-mcp:handle:sess_1:rounds', 90_000] },
+            { command: 'incr', args: ['steel-mcp:handle:calm-blue-fox:rounds'] },
+            { command: 'pexpire', args: ['steel-mcp:handle:calm-blue-fox:rounds', 90_000] },
         ]);
     });
 

@@ -19,9 +19,12 @@ import { RedisHandleRegistry } from './core/registry-redis.js';
 import { createSessionPlanCodec, type SessionPlanState } from './core/session-plan.js';
 import { SteelRestClient } from './core/steel/rest.js';
 import type { SteelApi } from './core/steel/types.js';
+import type { BrowserVault } from './core/vault/service.js';
+import { canonicalShip, VaultError, type VaultIdentity } from './core/vault/types.js';
 import type { RequestDepsInput } from './http.js';
 
 export interface HostedRuntimeOptions {
+    createVault?: (registry: HandleRegistry) => BrowserVault;
     /**
      * Builds the Steel endpoint/profile configuration for this caller. Cloud configurations carry
      * the caller credential to Steel; self-hosted configurations deliberately do not.
@@ -69,6 +72,7 @@ interface TenantClients {
  * one-way principal. Raw credentials stay only in their tenant client bundle, never in handles.
  */
 export class HostedRuntime {
+    readonly vault: BrowserVault | undefined;
     readonly registry: HandleRegistry;
     /**
      * One cost-weighted budget per principal, shared by every request this runtime serves.
@@ -108,6 +112,7 @@ export class HostedRuntime {
             onReleased: cause => options.onReleased?.(cause, this.registry.registryBackend),
         };
         this.registry = (options.createRegistry ?? (deps => new InMemoryHandleRegistry(deps)))(registryDeps);
+        this.vault = options.createVault?.(this.registry);
         this.limiter = (options.createLimiter ?? (now => new InMemoryRateLimiter({ now })))(this.now);
     }
 
@@ -170,6 +175,30 @@ export class HostedRuntime {
     depsForRequest = (input: RequestDepsInput): ServerDeps => {
         const tenant = this.tenantFor(input);
         return {
+            vault: this.vault
+                ? {
+                      hasProtectedValues: () => this.vault!.hasProtectedValues(input.principal),
+                      assertSession: record => this.vault!.assertSession(record),
+                      redact: result => this.vault!.redact(input.principal, result),
+                      bindSession: async (record, signal) => {
+                          let identity: VaultIdentity;
+                          try {
+                              identity = {
+                                  planet: canonicalShip(input.request.headers.get('x-tlon-parent-ship') ?? ''),
+                                  moon: canonicalShip(input.request.headers.get('x-tlon-ship') ?? ''),
+                              };
+                          } catch {
+                              throw new VaultError(
+                                  403,
+                                  'Browser vault setup requires valid planet and moon identity headers.'
+                              );
+                          }
+                          return this.vault!.bindSession(record, identity, input.credential, signal);
+                      },
+                      login: (record, signal, choice) => this.vault!.login(record, signal, choice),
+                      discover: (record, signal) => this.vault!.discover(record, signal),
+                  }
+                : undefined,
             config: tenant.config,
             api: tenant.api,
             pool: tenant.pool,
@@ -207,6 +236,7 @@ export class HostedRuntime {
      * replica that can, and Steel's own inactivity timeout remains the backstop underneath.
      */
     private async releaseOwnedSession(steelSessionId: string, principal: string): Promise<void> {
+        this.vault?.forgetSession(steelSessionId);
         const tenant = this.tenants.get(principal);
         if (!tenant) {
             throw new Error(
@@ -220,6 +250,7 @@ export class HostedRuntime {
 
     /** Called by the hosted reaper; active tools and every live/pending-handoff record pin a tenant. */
     pruneIdleTenants(): Promise<number> {
+        this.vault?.prune();
         this.pruning ??= this.prune().finally(() => {
             this.pruning = undefined;
         });
@@ -244,6 +275,7 @@ export class HostedRuntime {
 
     async close(): Promise<void> {
         this.closed = true;
+        this.vault?.close();
         const errors: unknown[] = [];
         if (this.pruning) await this.pruning.catch(error => errors.push(error));
         try {

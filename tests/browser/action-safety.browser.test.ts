@@ -29,7 +29,8 @@ afterAll(async () => {
 
 async function load(body: string): Promise<void> {
     const html = `<html><head><style>button { position:absolute; left:100px; top:100px; width:180px; height:50px } [role=dialog] { position:fixed; inset:0; } #cover { z-index:100; }</style></head><body>${body}<script>window.actions=[];for(const b of document.querySelectorAll('button')) b.onclick=()=>window.actions.push(b.id);</script></body></html>`;
-    await page.navigate(`data:text/html,${encodeURIComponent(html)}`);
+    // Test setup owns CDP; model navigation accepts only HTTP(S).
+    await session.send('Page.navigate', { url: `data:text/html,${encodeURIComponent(html)}` });
     await until(
         'fixture ready',
         async () =>

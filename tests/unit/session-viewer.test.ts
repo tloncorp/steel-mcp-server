@@ -41,7 +41,7 @@ import {
 } from '../../src/core/apps/session-viewer.js';
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJzZXNzaW9uIjoiMSJ9.Zm9vYmFyc2lnbmF0dXJl';
-const SESSION_ID = 'sess_MHKz9dQ1TjqLmA7vXpR2bw';
+const SESSION_ID = 'nimble-purple-otter';
 const CDP_URL = `wss://connect.steel.dev?sessionId=8f0b1c2d-3e4f-5a6b-7c8d-9e0f1a2b3c4d&token=${TOKEN}`;
 
 const metadata = {
@@ -121,11 +121,11 @@ describe('readSessionIdFromToolResult', () => {
         expect(readSessionIdFromToolResult({ structuredContent: { released: true } })).toBe(null);
         expect(readSessionIdFromToolResult({ content: [{ type: 'text', text: SESSION_ID }] })).toBe(null);
         expect(readSessionIdFromToolResult(null)).toBe(null);
-        expect(readSessionIdFromToolResult('sess_x')).toBe(null);
+        expect(readSessionIdFromToolResult('calm-blue-fox')).toBe(null);
     });
 
     it('refuses a session_id that is not a plain handle', () => {
-        expect(readSessionIdFromToolResult({ structuredContent: { session_id: 'sess_a b' } })).toBe(null);
+        expect(readSessionIdFromToolResult({ structuredContent: { session_id: 'calm-blue fox' } })).toBe(null);
         expect(readSessionIdFromToolResult({ structuredContent: { session_id: 'x' } })).toBe(null);
         expect(readSessionIdFromToolResult({ structuredContent: { session_id: 'a'.repeat(200) } })).toBe(null);
         expect(readSessionIdFromToolResult({ structuredContent: { session_id: 42 } })).toBe(null);
@@ -845,7 +845,7 @@ describe('SESSION_VIEWER_HTML', () => {
 
     it('bakes in no session data and no credential of any kind', () => {
         expect(SESSION_VIEWER_HTML).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-        expect(SESSION_VIEWER_HTML).not.toContain('sess_');
+        expect(SESSION_VIEWER_HTML).not.toContain(SESSION_ID);
         expect(SESSION_VIEWER_HTML).not.toMatch(/\btoken=[^<'"]/);
         expect(SESSION_VIEWER_HTML).not.toMatch(/\bey[A-Za-z0-9_-]{6,}\./);
     });

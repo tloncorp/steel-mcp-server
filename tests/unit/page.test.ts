@@ -120,6 +120,24 @@ async function catchAsync(promise: Promise<unknown>): Promise<SteelToolError> {
 }
 
 describe('BrowserPage.navigate', () => {
+    it.each([
+        'javascript:document.title="executed"',
+        'JaVaScRiPt:document.title="executed"',
+        'java\tscript:document.title="executed"',
+        'data:text/html,<script>alert(1)</script>',
+        'file:///etc/passwd',
+        'chrome://settings',
+        'about:blank',
+        '/relative-path',
+    ])('rejects %s before issuing any browser command', async url => {
+        const fixture = actionFixture(fixtureSession(page([SAVE_BUTTON])));
+        const browserPage = await openPage(fixture);
+        const calls = fixture.sent.length;
+        const error = await catchAsync(browserPage.navigate(url));
+        expect(error.code).toBe('invalid_argument');
+        expect(error.message).toContain('HTTP or HTTPS');
+        expect(fixture.sent).toHaveLength(calls);
+    });
     it('navigates and reports the final URL and change signal', async () => {
         const fixture = actionFixture(fixtureSession(page([SAVE_BUTTON])));
         const browserPage = await openPage(fixture);
