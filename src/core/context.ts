@@ -1,5 +1,6 @@
 // ABOUTME: The dependency bundle and registration surface every tool closes over, and the browser-pool
 // ABOUTME: contract that keeps one attached CDP page per Steel session so refs survive across calls.
+
 import { createHash, randomUUID } from 'node:crypto';
 import type { McpServer, RequestStateCodec } from '@modelcontextprotocol/server';
 import type { Tracer } from '@opentelemetry/api';
@@ -14,6 +15,7 @@ import type { HandleRecord, HandleRegistry } from './registry.js';
 import type { SessionPlanState } from './session-plan.js';
 import { resolveSettleBudgets } from './settle.js';
 import { CdpConnection, type CdpSession } from './steel/cdp.js';
+import type { SelectedFormRequest } from './steel/selected-form.js';
 import type { SteelApi } from './steel/types.js';
 import { resolveTracer, withCdpSpan } from './telemetry.js';
 import type { LoginOutcome } from './vault/types.js';
@@ -37,6 +39,8 @@ export interface SessionPool {
 
 /** Everything the tool layer needs. Held at module scope and closed over by the server factory. */
 export interface ServerDeps {
+    /** Optional deployment tools, registered through the same metering/tracing host. */
+    registerAdditionalTools?: ((host: ToolHost) => void) | undefined;
     /** Bound to this request's credential. Secrets stay inside the private vault service. */
     vault?: {
         assertSession(record: HandleRecord): Promise<void>;
@@ -45,6 +49,7 @@ export interface ServerDeps {
         bindSession(record: HandleRecord, signal?: AbortSignal): Promise<boolean>;
         login(
             record: HandleRecord,
+            selection: SelectedFormRequest,
             signal?: AbortSignal,
             choice?: { id: string; revision: number }
         ): Promise<LoginOutcome>;

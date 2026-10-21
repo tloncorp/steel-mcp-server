@@ -1,5 +1,6 @@
 // ABOUTME: Session lifecycle tools: explicit create with both Steel timeouts set, a release that
 // ABOUTME: captures context first, live-or-finished diagnostics, and the app-only live-view endpoint.
+
 import type { ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { SESSION_VIEWER_URI } from '../apps/session-viewer.js';
@@ -18,6 +19,7 @@ import {
     sessionLogErrorText,
     sessionLogUrl,
 } from '../steel/diagnostics.js';
+import { formFieldSelectorsSchema } from '../steel/selected-form.js';
 import type { AccountDetails, AgentTraceTimeline, SessionLogTimeline, SteelSession } from '../steel/types.js';
 import { fenceUntrusted } from '../untrusted.js';
 import { VaultError } from '../vault/types.js';
@@ -589,17 +591,7 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                     session_id: sessionIdSchema.optional().describe('Omit for this credential’s newest session.'),
                     action: z.enum(['connect', 'prepare_form', 'acquire', 'renew', 'release']).optional(),
                     control_token: z.string().optional(),
-                    fields: z
-                        .array(
-                            z.union([
-                                z.string().regex(/^@e\d+$/),
-                                z.object({ name: z.string().min(1).max(512) }).strict(),
-                                z.object({ label: z.string().min(1).max(1024) }).strict(),
-                            ])
-                        )
-                        .min(1)
-                        .max(40)
-                        .optional(),
+                    fields: formFieldSelectorsSchema.optional(),
                 })
                 .strict(),
             _meta: { ui: { visibility: ['app'] } },
@@ -612,17 +604,18 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                         code: 'invalid_argument',
                     });
                 if (action === 'prepare_form') {
-                    if (!args.session_id || args.control_token)
-                        throw new SteelToolError('Form preparation requires session_id and no control_token.', {
-                            code: 'invalid_argument',
-                        });
+                    if (!args.session_id || args.control_token || !args.fields)
+                        throw new SteelToolError(
+                            'Form preparation requires session_id and fields from a current snapshot, with no control_token.',
+                            {
+                                code: 'invalid_argument',
+                            }
+                        );
                     const record = await deps.registry.resolveForAgent(args.session_id, deps.principal);
                     await deps.vault?.assertSession(record);
-                    const selection = args.fields
-                        ? await (await deps.pool.page(record.steelSessionId, ctx.mcpReq.signal)).selectFormFields(
-                              args.fields
-                          )
-                        : { discover: true as const };
+                    const selection = await (
+                        await deps.pool.page(record.steelSessionId, ctx.mcpReq.signal)
+                    ).selectFormFields(args.fields);
                     const handoff = await deps.api.prepareFormHandoff(
                         record.steelSessionId,
                         selection,
@@ -719,7 +712,7 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                     });
                 }
 
-                if (deps.vault) {
+                if (deps.vault || (!session.websocketUrl && session.sessionViewerUrl)) {
                     if (!session.sessionViewerUrl)
                         throw new SteelToolError('Steel returned no owner viewer for this session.', {
                             code: 'steel_error',

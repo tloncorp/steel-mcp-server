@@ -298,7 +298,7 @@ invalidate saved passwords. The factor alone cannot decrypt anything. Owner proo
 HMAC domain, expire after ten minutes, and are verified against the current planet code and server time. Both values travel only through
 private service requests; neither is returned by MCP or the Solaris metadata API.
 
-The model-facing `browser_login` tool fills through the private browser API and returns an outcome.
+The model-facing `browser_login` tool requires `fields` from a current snapshot when using a saved login. It fills only those controls through the private browser API and returns an outcome without clicking or submitting. The agent inspects the page and chooses the next action. Owner secure-entry cards use the same selection and fill-only contract.
 It makes at most one automatic attempt per account revision and form step; filling is not proof of
 sign-in. Known filled values are redacted from tool results and automation-model input. Raw CDP,
 screenshots, and PDFs are unavailable through MCP when the vault is enabled. The live viewer

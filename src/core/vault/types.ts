@@ -1,6 +1,8 @@
 // ABOUTME: The vault's encrypted records and private service protocol. No type here is a secret-return MCP tool.
 // ABOUTME: Strict schemas keep encrypted records separate from public account metadata.
+
 import { z } from 'zod';
+import type { SelectedFormRequest } from '../steel/selected-form.js';
 
 export class VaultError extends Error {
     constructor(
@@ -124,6 +126,7 @@ export type SecureForm = z.infer<typeof secureFormSchema>;
 export type FormTarget = z.infer<typeof formTargetSchema>;
 
 export interface VaultBrowser {
+    prepare(sessionId: string, selection: SelectedFormRequest, signal?: AbortSignal): Promise<SecureForm>;
     discover(sessionId: string, signal?: AbortSignal): Promise<SecureForm | null>;
     getBound(sessionId: string, formId: string, signal?: AbortSignal): Promise<SecureForm | null>;
     fill(

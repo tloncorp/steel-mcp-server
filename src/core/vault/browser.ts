@@ -1,6 +1,7 @@
 // ABOUTME: Secret-bearing browser calls bypass MCP serialization and general REST error reporting.
 // ABOUTME: Handoffs resolve their bound form while agent login discovery inspects the current page.
 import { z } from 'zod';
+import type { SelectedFormRequest } from '../steel/selected-form.js';
 import { privateJson } from './transport.js';
 import { formTarget, type SecureForm, secureFormSchema, type VaultBrowser, VaultError } from './types.js';
 
@@ -13,6 +14,25 @@ export class PrivateVaultBrowser implements VaultBrowser {
     private url(sessionId: string): URL {
         z.uuid().parse(sessionId);
         return new URL(`/v1/sessions/${sessionId}/credential-form`, this.baseUrl);
+    }
+
+    async prepare(sessionId: string, selection: SelectedFormRequest, signal?: AbortSignal): Promise<SecureForm> {
+        const url = this.url(sessionId);
+        url.pathname = url.pathname.replace('/credential-form', '/credential-handoff');
+        const result = secureFormSchema.safeParse(
+            await privateJson(
+                url,
+                {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(selection),
+                    signal,
+                },
+                this.fetchImpl
+            )
+        );
+        if (!result.success) throw new VaultError(503, 'The browser returned an invalid selected form.');
+        return result.data;
     }
 
     async discover(sessionId: string, signal?: AbortSignal): Promise<SecureForm | null> {
@@ -40,7 +60,7 @@ export class PrivateVaultBrowser implements VaultBrowser {
         sessionId: string,
         form: SecureForm,
         values: Record<string, string>,
-        submit: boolean,
+        _submit: boolean,
         signal?: AbortSignal
     ): Promise<{ submitted: boolean }> {
         const result = z.object({ submitted: z.boolean() }).safeParse(
@@ -49,7 +69,7 @@ export class PrivateVaultBrowser implements VaultBrowser {
                 {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ target: formTarget(form), values, submit, vault: true }),
+                    body: JSON.stringify({ target: formTarget(form), values, submit: false, vault: true }),
                     signal,
                 },
                 this.fetchImpl

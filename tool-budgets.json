@@ -1,13 +1,13 @@
 {
-    "$comment": "tools/list byte budgets per profile. CI fails on a regression; raising a number is a deliberate, reviewed act.",
+    "$comment": "tools/list byte budgets per profile. CI fails on a regression; raising a number is a deliberate, reviewed act. The browse/login caps include the explicit field-selection schema for fill-only saved logins.",
     "instructionsBytes": 2048,
     "profiles": {
         "scrape": { "tools": 3, "bytes": 4000 },
-        "browse": { "tools": 18, "bytes": 18500 }
+        "browse": { "tools": 18, "bytes": 19000 }
     },
     "toolBytes": {
         "browser_session_create": 1200,
         "browser_session_options": 950,
-        "browser_login": 800
+        "browser_login": 1250
     }
 }

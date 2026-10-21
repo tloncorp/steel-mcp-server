@@ -183,5 +183,6 @@ export function createSteelMcpServer(deps: ServerDeps): McpServer {
         tool.register(host, deps);
     }
 
+    deps.registerAdditionalTools?.(host);
     return server;
 }

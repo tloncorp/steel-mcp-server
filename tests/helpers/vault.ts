@@ -15,6 +15,22 @@ import {
     type VaultStore,
 } from '../../src/core/vault/types.js';
 
+export const selection = {
+    pageId: 'page-1',
+    fields: [
+        {
+            backendNodeId: 10,
+            frameId: 'frame-1',
+            loaderId: 'loader-1',
+            tagName: 'INPUT' as const,
+            type: 'email',
+            name: 'email',
+            id: 'email',
+            label: 'Email',
+        },
+    ],
+};
+
 export const root = Buffer.alloc(32, 7).toString('base64');
 export const alice = { planet: 'sampel-palnet', moon: 'pinser-botter-sampel-palnet' };
 export const sibling = { ...alice, moon: 'worlet-samtes-sampel-palnet' };
@@ -103,6 +119,7 @@ export function fixture(browser?: VaultBrowser) {
         registry,
         now: () => now,
         browser: browser ?? {
+            prepare: async () => page!,
             discover: async () => page,
             getBound: async (_sessionId, formId) => (page?.formId === formId ? page : null),
             fill: async (sessionId, target, submittedValues, submit) => {

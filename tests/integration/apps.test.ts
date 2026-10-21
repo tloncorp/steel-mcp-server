@@ -561,6 +561,22 @@ describe('browser_session_live_view', () => {
         expect(stranger.deps.api.sessionReads).toHaveLength(0);
     });
 
+    it('returns the signed viewer without CDP when the gateway disables raw access', async () => {
+        const harness = await connect(testDeps({ api: new FakeSteelApi({ websocketUrl: null }) }));
+        const sessionId = await newSession(harness);
+        const [record] = await harness.deps.registry.list(harness.deps.principal);
+        vi.spyOn(harness.deps.api, 'getSession').mockResolvedValue({
+            id: record!.steelSessionId,
+            status: 'live',
+            sessionViewerUrl: 'https://viewer.test/s/entry.signature',
+            websocketUrl: '',
+        });
+        const { result, structured } = await liveView(harness, sessionId);
+        expect(isError(result)).toBe(false);
+        expect(structured?.viewer_url).toBeTruthy();
+        expect(structured).not.toHaveProperty('cdp_url');
+    });
+
     it('reports a deployment that returns no CDP URL instead of building one from the API key', async () => {
         const harness = await connect(testDeps({ api: new FakeSteelApi({ websocketUrl: null }) }));
         const sessionId = await newSession(harness);
