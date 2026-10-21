@@ -1,10 +1,23 @@
 // ABOUTME: Vault partitioning, authorization, encryption, and one-use login flow invariants.
 // ABOUTME: Credential use requires current consent and never returns decrypted secrets.
+
 import { randomBytes, randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { VaultCipher } from '../../src/core/vault/crypto.js';
 import { formTarget } from '../../src/core/vault/types.js';
-import { alice, browserKey, fixture, form, other, owner, pair, secret, sibling, values } from '../helpers/vault.js';
+import {
+    alice,
+    browserKey,
+    fixture,
+    form,
+    other,
+    owner,
+    pair,
+    secret,
+    selection,
+    sibling,
+    values,
+} from '../helpers/vault.js';
 
 describe('vault cipher', () => {
     it('encrypts with fresh nonces and authenticates every scope and metadata field', () => {
@@ -64,7 +77,7 @@ describe('planet-backed browser vault', () => {
                 permission: 'ask',
             },
         ]);
-        expect(await f.vault.login(record, undefined, { id: saved.id, revision: saved.revision })).toEqual({
+        expect(await f.vault.login(record, selection, undefined, { id: saved.id, revision: saved.revision })).toEqual({
             status: 'approval_required',
         });
         expect(f.fills).toEqual([]);
@@ -78,7 +91,7 @@ describe('planet-backed browser vault', () => {
         const auth = await f.handoff(record);
         await f.vault.fill({ ...auth, submit: true, use: { id: saved.id, revision: 1 } });
         expect(f.fills).toHaveLength(1);
-        expect(await f.vault.login(await f.session())).toEqual({ status: 'approval_required' });
+        expect(await f.vault.login(await f.session(), selection)).toEqual({ status: 'approval_required' });
     });
 
     it('saves automatic use only on explicit consent and honors revocation', async () => {
@@ -88,15 +101,15 @@ describe('planet-backed browser vault', () => {
         const saved = f.store.records.get(pair(alice))![0]!;
         expect(saved.permission).toBe('ask');
         await f.vault.setPermission(alice, owner(alice), { id: saved.id, revision: 1 }, 'allow');
-        expect(await f.vault.login(await f.session())).toMatchObject({ status: 'filled' });
+        expect(await f.vault.login(await f.session(), selection)).toMatchObject({ status: 'filled' });
         await f.vault.setPermission(alice, owner(alice), { id: saved.id, revision: 2 }, 'ask');
-        expect(await f.vault.login(await f.session())).toEqual({ status: 'approval_required' });
+        expect(await f.vault.login(await f.session(), selection)).toEqual({ status: 'approval_required' });
     });
 
     it('protects known values in model-visible text independently of DOM attributes', async () => {
         f.seed();
         const record = await f.session();
-        await f.vault.login(record);
+        await f.vault.login(record, selection);
         const result = {
             content: [{ type: 'text', text: `Accessible label ${secret.password}` }],
             structuredContent: {
@@ -115,14 +128,14 @@ describe('planet-backed browser vault', () => {
         const auth = await f.handoff(first);
         expect(auth.accounts).toEqual([]);
         const saved = await f.vault.fill({ ...auth, values, submit: true, save: { permission: 'allow' } });
-        expect(saved).toEqual({ ok: true, submitted: true, saveStatus: 'saved' });
-        expect(await f.vault.login(first)).toEqual({ status: 'needs_input' });
+        expect(saved).toEqual({ ok: true, submitted: false, saveStatus: 'saved' });
+        expect(await f.vault.login(first, selection)).toEqual({ status: 'needs_input' });
         const second = await f.session();
-        const outcome = await f.vault.login(second);
-        expect(outcome).toEqual({ status: 'filled', submission_attempted: true });
+        const outcome = await f.vault.login(second, selection);
+        expect(outcome).toEqual({ status: 'filled', submission_attempted: false });
         expect(f.fills.at(-1)).toEqual({ sessionId: second.steelSessionId, values });
         expect(JSON.stringify([saved, outcome, [...f.store.records.values()]])).not.toContain(secret.password);
-        expect(await f.vault.login(second)).toEqual({ status: 'needs_input' });
+        expect(await f.vault.login(second, selection)).toEqual({ status: 'needs_input' });
         expect(f.fills).toHaveLength(2);
     });
 
@@ -134,7 +147,7 @@ describe('planet-backed browser vault', () => {
         );
         for (const identity of [sibling, other]) {
             const unrelated = await f.session(identity);
-            expect(await f.vault.login(unrelated)).toEqual({ status: 'no_match' });
+            expect(await f.vault.login(unrelated, selection)).toEqual({ status: 'no_match' });
             expect(await f.vault.list(identity, owner(identity))).toEqual([]);
         }
         await expect(f.vault.list(alice, owner(other))).rejects.toThrow();
@@ -151,13 +164,13 @@ describe('planet-backed browser vault', () => {
         const chosen = f.seed();
         f.seed(alice, { ...secret, label: 'Work', password: 'work-secret' });
         const record = await f.session();
-        expect(await f.vault.login(record)).toEqual({ status: 'choice_required' });
+        expect(await f.vault.login(record, selection)).toEqual({ status: 'choice_required' });
         const auth = await f.handoff(record);
         expect(auth.accounts.map(account => account.label)).toEqual(['Personal', 'Work']);
         expect(JSON.stringify(auth)).not.toContain(secret.password);
         await f.vault.fill({ ...auth, submit: true, use: { id: chosen.id, revision: 1 } });
         expect(f.fills.at(-1)?.values).toEqual(values);
-        expect(await f.vault.login(record)).toEqual({ status: 'needs_input' });
+        expect(await f.vault.login(record, selection)).toEqual({ status: 'needs_input' });
     });
 
     it('consumes grants before fills, including failures, and expires handoffs', async () => {
@@ -180,9 +193,9 @@ describe('planet-backed browser vault', () => {
         f.store.ownerTokens.set(alice.planet, 'new-owner');
         await expect(f.vault.fill({ ...auth, values, submit: true, save: {} })).rejects.toThrow('Denied');
         f.store.browserKeys.set(pair(alice), 'new-browser-key');
-        await expect(f.vault.login(stale)).rejects.toThrow('Denied');
+        await expect(f.vault.login(stale, selection)).rejects.toThrow('Denied');
         const current = await f.session();
-        expect(await f.vault.login(current)).toEqual({ status: 'filled', submission_attempted: true });
+        expect(await f.vault.login(current, selection)).toEqual({ status: 'filled', submission_attempted: false });
         expect(await f.vault.list(alice, 'new-owner')).toHaveLength(1);
         expect(f.fills.at(-1)?.values).toEqual(values);
     });
@@ -275,7 +288,7 @@ describe('planet-backed browser vault', () => {
         f.store.failWrite = true;
         expect(await f.vault.fill({ ...auth, values, submit: true, save: {} })).toEqual({
             ok: true,
-            submitted: true,
+            submitted: false,
             saveStatus: 'failed',
         });
         expect(f.fills).toHaveLength(1);
@@ -285,7 +298,7 @@ describe('planet-backed browser vault', () => {
             { ...form(), fields: [{ ...form().fields[1]!, purpose: 'one-time-code' }] },
         ]) {
             f.page(unsafe);
-            expect(await f.vault.login(record)).toEqual({ status: 'needs_input' });
+            expect(await f.vault.login(record, selection)).toEqual({ status: 'needs_input' });
         }
         expect(f.fills).toHaveLength(1);
     });
@@ -298,13 +311,13 @@ describe('planet-backed browser vault', () => {
         await expect(f.vault.fill({ ...auth, submit: true, use: { id: saved.id, revision: 1 } })).rejects.toThrow(
             'changed'
         );
-        expect(await f.vault.login(record)).toEqual({ status: 'no_match' });
+        expect(await f.vault.login(record, selection)).toEqual({ status: 'no_match' });
         f.seed();
         const control = await f.registry.acquireHumanControl(record.handle, record.principal, 60_000);
-        await expect(f.vault.login(record)).rejects.toThrow('human control');
+        await expect(f.vault.login(record, selection)).rejects.toThrow('human control');
         await f.registry.releaseHumanControl(record.handle, record.principal, control.token);
         await f.registry.release(record.handle, record.principal, 'explicit');
-        await expect(f.vault.login(record)).rejects.toThrow('unavailable');
+        await expect(f.vault.login(record, selection)).rejects.toThrow('unavailable');
         expect(f.fills).toEqual([]);
     });
 });

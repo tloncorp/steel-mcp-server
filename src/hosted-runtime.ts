@@ -195,7 +195,8 @@ export class HostedRuntime {
                           }
                           return this.vault!.bindSession(record, identity, input.credential, signal);
                       },
-                      login: (record, signal, choice) => this.vault!.login(record, signal, choice),
+                      login: (record, selection, signal, choice) =>
+                          this.vault!.login(record, selection, signal, choice),
                       discover: (record, signal) => this.vault!.discover(record, signal),
                   }
                 : undefined,

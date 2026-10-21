@@ -1,9 +1,11 @@
 // ABOUTME: Ship-stored credentials expose metadata to bots and enforce owner-selected reuse permission.
 // ABOUTME: Owner handoffs fill once; automatic fills require the current stored allow policy.
+
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { HandleRecord, HandleRegistry } from '../registry.js';
 import { principalFromCredential } from '../registry.js';
+import type { SelectedFormRequest } from '../steel/selected-form.js';
 import type { VaultCipher } from './crypto.js';
 import {
     type EncryptedLogin,
@@ -352,13 +354,7 @@ export class BrowserVault {
                 .forEach(value => {
                     session.secrets.add(value);
                 });
-            const result = await this.options.browser.fill(
-                handoff.sessionId,
-                handoff.form,
-                values,
-                input.submit,
-                signal
-            );
+            const result = await this.options.browser.fill(handoff.sessionId, handoff.form, values, false, signal);
             await this.options.registry.touch(session.handle);
             if (session.flowVersion !== flowVersion)
                 return {
@@ -448,12 +444,17 @@ export class BrowserVault {
         return JSON.stringify([login.id, login.revision, login.origin, form.fields.map(field => field.purpose).sort()]);
     }
 
-    async login(record: HandleRecord, signal?: AbortSignal, choice?: RecordChoice): Promise<LoginOutcome> {
+    async login(
+        record: HandleRecord,
+        selection: SelectedFormRequest,
+        signal?: AbortSignal,
+        choice?: RecordChoice
+    ): Promise<LoginOutcome> {
         return this.exclusive(record.steelSessionId, async () => {
             const session = await this.session(record.steelSessionId, true);
             if (session.principal !== record.principal || session.handle !== record.handle)
                 throw new VaultError(403, 'This browser belongs to another credential.');
-            const form = await this.options.browser.discover(record.steelSessionId, signal);
+            const form = await this.options.browser.prepare(record.steelSessionId, selection, signal);
             if (!form || !loginFields(form)) return { status: 'needs_input' };
             this.clearFlow(session, form.origin);
             const matches = (
@@ -479,7 +480,7 @@ export class BrowserVault {
                 .forEach(value => {
                     session.secrets.add(value);
                 });
-            const result = await this.options.browser.fill(record.steelSessionId, form, values, true, signal);
+            const result = await this.options.browser.fill(record.steelSessionId, form, values, false, signal);
             session.selected = {
                 id: login.id,
                 revision: login.revision,

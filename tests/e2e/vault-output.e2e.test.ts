@@ -20,7 +20,9 @@ describe.skipIf(!binary)('saved-login output in Chrome', () => {
         const browser = await HeadlessChrome.launch(binary!);
         const site = createServer((_req, res) => {
             res.setHeader('Content-Type', 'text/html');
-            res.end('<title>Login</title><input type="password"><div id="echo"></div><button>Continue</button>');
+            res.end(
+                '<title>Login</title><input type="password" name="password"><div id="echo"></div><button>Continue</button>'
+            );
         });
         const pool = new CdpSessionPool(loadConfig({ STEEL_LOCAL: 'true' }), 1, () =>
             CdpConnection.connect(browser.debuggerUrl)
@@ -36,7 +38,7 @@ describe.skipIf(!binary)('saved-login output in Chrome', () => {
             hasProtectedValues: () => f.vault.hasProtectedValues(record.principal),
             redact: value => f.vault.redact(record.principal, value),
             discover: (record, signal) => f.vault.discover(record, signal),
-            login: (record, signal, choice) => f.vault.login(record, signal, choice),
+            login: (record, selection, signal, choice) => f.vault.login(record, selection, signal, choice),
         };
         const server = createSteelMcpServer(deps);
         const client = new Client({ name: 'vault-output', version: '1' });
@@ -65,7 +67,11 @@ describe.skipIf(!binary)('saved-login output in Chrome', () => {
             });
             expect(JSON.stringify(listed)).toContain(saved.id);
             expect(JSON.stringify(listed)).not.toContain(secret.password);
-            const filled = await client.callTool({ name: 'browser_login', arguments: { session_id: record.handle } });
+            await page.snapshot({});
+            const filled = await client.callTool({
+                name: 'browser_login',
+                arguments: { session_id: record.handle, fields: [{ name: 'password' }] },
+            });
             expect(filled.structuredContent).toMatchObject({ login: { status: 'filled' } });
             expect((await page.snapshot({ interactiveOnly: false })).text).toContain(secret.password);
             const snapshot = await client.callTool({

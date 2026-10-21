@@ -9,7 +9,7 @@ import { PioneerVaultStore } from '../../src/core/vault/pioneer.js';
 import type { BrowserVault } from '../../src/core/vault/service.js';
 import { formTarget } from '../../src/core/vault/types.js';
 import { createVaultHttp } from '../../src/vault-http.js';
-import { alice, fixture, form, owner, pair, values } from '../helpers/vault.js';
+import { alice, fixture, form, owner, pair, selection, values } from '../helpers/vault.js';
 
 const token = 'service-secret-'.repeat(4);
 const identity = { planet: 'sampel-palnet', moon: 'pinser-botter-sampel-palnet' };
@@ -221,5 +221,44 @@ describe('bound login preparation', () => {
         expect(saved).toHaveLength(1);
         expect(saved[0]!.permission).toBe('ask');
         expect(JSON.stringify(saved)).not.toContain(values.f1);
+    });
+});
+
+describe('agent-selected saved-login filling', () => {
+    it('binds only the requested fields and never requests a submit', async () => {
+        const target = form();
+        const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+            const url = new URL(String(input));
+            if (url.pathname.endsWith('/credential-handoff')) {
+                expect(JSON.parse(String(init?.body))).toEqual(selection);
+                return Response.json(target);
+            }
+            expect(url.pathname.endsWith('/credential-form')).toBe(true);
+            expect(init?.method).toBe('POST');
+            expect(JSON.parse(String(init?.body))).toEqual({
+                target: formTarget(target),
+                values,
+                submit: false,
+                vault: true,
+            });
+            return Response.json({ submitted: false });
+        });
+        const f = fixture(new PrivateVaultBrowser('http://browser.test', fetcher));
+        f.seed();
+        const record = await f.session();
+        expect(await f.vault.login(record, selection)).toEqual({ status: 'filled', submission_attempted: false });
+        expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([404, 409, 500])('does not fall back to discovery when the selected form fails (%s)', async status => {
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}', { status }));
+        const f = fixture(new PrivateVaultBrowser('http://browser.test', fetcher));
+        f.seed();
+        const record = await f.session();
+        await expect(f.vault.login(record, selection)).rejects.toThrow();
+        expect(fetcher).toHaveBeenCalledOnce();
+        expect(new URL(String(fetcher.mock.calls[0]![0])).pathname).toBe(
+            `/v1/sessions/${record.steelSessionId}/credential-handoff`
+        );
     });
 });

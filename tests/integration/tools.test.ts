@@ -1,5 +1,6 @@
 // ABOUTME: Integration tests driving the whole tool surface through a real MCP client over the
 // ABOUTME: in-memory transport, with fakes only at the Steel REST and browser-pool boundaries.
+
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/client';
@@ -10,6 +11,7 @@ import { MAX_INLINE_SCREENSHOT_BYTES } from '../../src/core/tools/stateless.js';
 import { UNTRUSTED_FENCE_CLOSE, UNTRUSTED_FENCE_OPEN_TAG } from '../../src/core/untrusted.js';
 import { VaultError } from '../../src/core/vault/types.js';
 import { FakeSteelApi, testDeps } from '../helpers/fakes.js';
+import { selection } from '../helpers/vault.js';
 
 type Deps = ReturnType<typeof testDeps>;
 
@@ -112,7 +114,7 @@ describe('private saved-login tool', () => {
     it('binds new sessions and returns only outcomes, with fixed errors on service failure', async () => {
         const deps = testDeps();
         const bindSession = vi.fn().mockResolvedValue(true);
-        const login = vi.fn().mockResolvedValue({ status: 'filled', submission_attempted: true });
+        const login = vi.fn().mockResolvedValue({ status: 'filled', submission_attempted: false });
         deps.vault = {
             assertSession: vi.fn().mockResolvedValue(undefined),
             bindSession,
@@ -125,10 +127,20 @@ describe('private saved-login tool', () => {
         try {
             const session = await newSession(h);
             expect(bindSession).toHaveBeenCalledOnce();
-            const result = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
+            const record = await deps.registry.resolveForAgent(session, deps.principal);
+            const page = await deps.pool.page(record.steelSessionId);
+            const select = vi.spyOn(page, 'selectFormFields').mockResolvedValue(selection);
+            const missing = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
+            expect(isError(missing)).toBe(true);
+            expect(login).not.toHaveBeenCalled();
+            expect(select).not.toHaveBeenCalled();
+            const result = await h.client.callTool({
+                name: 'browser_login',
+                arguments: { session_id: session, fields: ['@e12'] },
+            });
             expect(result.structuredContent).toMatchObject({
                 session_id: session,
-                login: { status: 'filled', submission_attempted: true },
+                login: { status: 'filled', submission_attempted: false },
             });
             for (const name of ['browser_screenshot', 'browser_pdf']) {
                 const denied = await h.client.callTool({
@@ -147,23 +159,37 @@ describe('private saved-login tool', () => {
                 expect(JSON.stringify(denied)).toContain('protected credentials');
             }
 
-            const prepared = await h.client.callTool({
+            const unselected = await h.client.callTool({
                 name: 'browser_session_live_view',
                 arguments: { session_id: session, action: 'prepare_form' },
             });
+            expect(isError(unselected)).toBe(true);
+            expect(deps.api.preparedForms).toHaveLength(0);
+            const prepared = await h.client.callTool({
+                name: 'browser_session_live_view',
+                arguments: { session_id: session, action: 'prepare_form', fields: ['@e12'] },
+            });
             expect(isError(prepared)).toBe(false);
             expect(prepared.structuredContent).toMatchObject({ session_id: session, viewer_url: expect.any(String) });
-            expect(deps.api.preparedForms[0]?.request).toEqual({ discover: true });
+            expect(deps.api.preparedForms[0]?.request).toEqual(selection);
+            expect(select).toHaveBeenCalledWith(['@e12']);
+            expect(login.mock.calls[0]?.[1]).toEqual(selection);
             expect(deps.vault.assertSession).toHaveBeenCalled();
             login.mockResolvedValueOnce({ status: 'approval_required' });
-            const approval = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
+            const approval = await h.client.callTool({
+                name: 'browser_login',
+                arguments: { session_id: session, fields: ['@e12'] },
+            });
             expect(approval.structuredContent).toMatchObject({
                 login: { status: 'approval_required' },
                 next_step: expect.stringContaining(`browser approve-login ${session}`),
             });
             expect(approval.structuredContent).toMatchObject({ next_step: expect.stringContaining('Wait') });
             login.mockRejectedValue(new Error('private-password private-owner-token'));
-            const failed = await h.client.callTool({ name: 'browser_login', arguments: { session_id: session } });
+            const failed = await h.client.callTool({
+                name: 'browser_login',
+                arguments: { session_id: session, fields: ['@e12'] },
+            });
             expect(failed.structuredContent).toMatchObject({ login: { status: 'unavailable' } });
             expect(JSON.stringify(failed)).not.toMatch(/private-password|private-owner-token/);
             const wrong = await h.client.callTool({ name: 'browser_login', arguments: { session_id: 'unknown' } });
