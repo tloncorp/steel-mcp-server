@@ -246,15 +246,63 @@ describe('browser_session_create', () => {
         expect(viewerTools).toEqual(['browser_session_create']);
     });
 
-    it('returns exactly what it always did', async () => {
+    it('returns a readable session handle in the tool instructions', async () => {
         const harness = await connect();
         const result = await harness.client.callTool({ name: 'browser_session_create', arguments: {} });
         expect(textOf(result)).toContain('Started a browser session.');
-        expect(textOf(result)).toContain('Pass session_id="sess_');
+        expect(textOf(result)).toMatch(/Pass session_id="[a-z]+-[a-z]+-[a-z]+"/);
     });
 });
 
 describe('browser_session_live_view', () => {
+    it.each(['', 'wss://viewer.test/cdp?cap=private'])(
+        'shares a vault session through its owner viewer without returning CDP (%s)',
+        async websocketUrl => {
+            const deps = testDeps();
+            deps.vault = {
+                assertSession: vi.fn(),
+                bindSession: vi.fn().mockResolvedValue(true),
+                login: vi.fn(),
+                discover: vi.fn(),
+                hasProtectedValues: () => true,
+                redact: result => result,
+            };
+            const harness = await connect(deps);
+            const handle = await newSession(harness);
+            const [record] = await deps.registry.list(deps.principal);
+            const read = vi.spyOn(deps.api, 'getSession').mockResolvedValue({
+                id: record!.steelSessionId,
+                status: 'live',
+                sessionViewerUrl: 'https://viewer.test/s/owner-entry.signature',
+                websocketUrl,
+            });
+
+            const { result, structured } = await liveView(harness, handle);
+            expect(isError(result)).toBe(false);
+            expect(structured).toMatchObject({
+                session_id: handle,
+                viewer_url: 'https://viewer.test/s/owner-entry.signature',
+            });
+            expect(structured).not.toHaveProperty('cdp_url');
+            expect(textOf(result)).not.toContain('owner-entry');
+            expect(JSON.stringify(result)).not.toContain('cap=private');
+            expect(deps.vault.assertSession).toHaveBeenCalledWith(record);
+
+            read.mockResolvedValueOnce({ id: record!.steelSessionId, status: 'live', websocketUrl });
+            const missingViewer = await liveView(harness, handle);
+            expect(isError(missingViewer.result)).toBe(true);
+            expect(textOf(missingViewer.result)).toContain('owner viewer');
+            expect(missingViewer.structured).not.toHaveProperty('cdp_url');
+
+            read.mockClear();
+            vi.mocked(deps.vault.assertSession).mockRejectedValueOnce(new Error('Identity mismatch'));
+            const unauthorized = await liveView(harness, handle);
+            expect(isError(unauthorized.result)).toBe(true);
+            expect(unauthorized.structured).not.toHaveProperty('viewer_url');
+            expect(read).not.toHaveBeenCalled();
+        }
+    );
+
     it('prepares selected snapshot controls through the authenticated native-card path', async () => {
         const harness = await connect(
             testDeps({
@@ -511,6 +559,22 @@ describe('browser_session_live_view', () => {
         expect(structured).not.toHaveProperty('cdp_url');
         // Rejected before any Steel call, so there is no minted token to leak in the first place.
         expect(stranger.deps.api.sessionReads).toHaveLength(0);
+    });
+
+    it('returns the signed viewer without CDP when the gateway disables raw access', async () => {
+        const harness = await connect(testDeps({ api: new FakeSteelApi({ websocketUrl: null }) }));
+        const sessionId = await newSession(harness);
+        const [record] = await harness.deps.registry.list(harness.deps.principal);
+        vi.spyOn(harness.deps.api, 'getSession').mockResolvedValue({
+            id: record!.steelSessionId,
+            status: 'live',
+            sessionViewerUrl: 'https://viewer.test/s/entry.signature',
+            websocketUrl: '',
+        });
+        const { result, structured } = await liveView(harness, sessionId);
+        expect(isError(result)).toBe(false);
+        expect(structured?.viewer_url).toBeTruthy();
+        expect(structured).not.toHaveProperty('cdp_url');
     });
 
     it('reports a deployment that returns no CDP URL instead of building one from the API key', async () => {

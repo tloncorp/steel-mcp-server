@@ -72,6 +72,10 @@
             "description": "Shut a browser session down and stop the meter."
         },
         {
+            "name": "browser_login",
+            "description": "Fill a saved login privately on the current exact HTTPS origin."
+        },
+        {
             "name": "browser_navigate",
             "description": "Point an open browser session at a URL."
         },

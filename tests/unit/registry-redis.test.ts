@@ -28,6 +28,7 @@ interface HarnessOptions {
     clock?: ReturnType<typeof testClock>;
     releaseSteelSession?: RegistryDeps['releaseSteelSession'];
     onReapError?: RegistryDeps['onReapError'];
+    generateHandle?: RegistryDeps['generateHandle'];
 }
 
 /** Builds one replica. Pass the same store and clock twice to model two replicas of one deployment. */
@@ -44,6 +45,7 @@ function harness(options: HarnessOptions = {}) {
                 released.push(id);
             }),
         onReapError: options.onReapError,
+        generateHandle: options.generateHandle,
     });
     return { registry, store, clock, released };
 }
@@ -58,15 +60,14 @@ async function captureError(promise: Promise<unknown>): Promise<SteelToolError> 
 }
 
 describe('RedisHandleRegistry.create', () => {
-    it('mints an opaque prefixed handle with at least 128 bits of entropy', async () => {
+    it('mints a readable adjective-color-animal handle', async () => {
         const { registry, clock } = harness();
         const record = await registry.create({
             principal: ORG_A,
             steelSessionId: 'steel-1',
             expiresAt: clock.ms + 60_000,
         });
-        expect(record.handle.startsWith('sess_')).toBe(true);
-        expect(record.handle.length - 'sess_'.length).toBeGreaterThanOrEqual(22);
+        expect(record.handle).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
     });
 
     it('never derives the handle from the principal or the Steel id', async () => {
@@ -241,7 +242,7 @@ describe('RedisHandleRegistry.resolve', () => {
         });
 
         const wrongOrg = await registry.resolve(handle, ORG_B).catch(e => (e as Error).message);
-        const unknown = await registry.resolve('sess_nope', ORG_B).catch(e => (e as Error).message);
+        const unknown = await registry.resolve('missing-blue-fox', ORG_B).catch(e => (e as Error).message);
         expect(wrongOrg).toBe(unknown);
     });
 
@@ -291,7 +292,7 @@ describe('RedisHandleRegistry.touch', () => {
 
     it('ignores an unknown handle', async () => {
         const { registry } = harness();
-        await expect(registry.touch('sess_nope')).resolves.toBeUndefined();
+        await expect(registry.touch('missing-blue-fox')).resolves.toBeUndefined();
     });
 });
 
@@ -614,6 +615,107 @@ describe('RedisHandleRegistry.recordHandoff', () => {
 });
 
 describe('RedisHandleRegistry across replicas', () => {
+    it('atomically reserves colliding names across concurrent replicas', async () => {
+        const clock = testClock();
+        const store = new FakeRedis({ now: clock.now });
+        const first = harness({ clock, store, generateHandle: () => 'nimble-purple-otter' }).registry;
+        const second = harness({
+            clock,
+            store,
+            generateHandle: vi.fn().mockReturnValueOnce('nimble-purple-otter').mockReturnValue('calm-blue-fox'),
+        }).registry;
+        const [a, b] = await Promise.all([
+            first.create({ principal: ORG_A, steelSessionId: 's1', expiresAt: clock.ms + 60_000 }),
+            second.create({ principal: ORG_B, steelSessionId: 's2', expiresAt: clock.ms + 60_000 }),
+        ]);
+        expect(a.handle).not.toBe(b.handle);
+        await expect(second.resolve(a.handle, ORG_A)).resolves.toMatchObject({ steelSessionId: 's1' });
+        await expect(first.resolve(b.handle, ORG_B)).resolves.toMatchObject({ steelSessionId: 's2' });
+    });
+
+    it('does not let a stale principal index erase a reused name', async () => {
+        const { registry, store, clock } = harness({ generateHandle: () => 'nimble-purple-otter' });
+        const original = await registry.create({
+            principal: ORG_A,
+            steelSessionId: 's1',
+            expiresAt: clock.ms + 60_000,
+        });
+        await registry.release(original.handle, ORG_A, 'explicit');
+        const current = await registry.create({ principal: ORG_B, steelSessionId: 's2', expiresAt: clock.ms + 60_000 });
+        await store.sadd(`steel-mcp:principal:${ORG_A}`, current.handle);
+        await store.sadd('steel-mcp:live', `${ORG_A}:${current.handle}`);
+        expect(await registry.list(ORG_A)).toEqual([]);
+        expect(await registry.list(ORG_B)).toHaveLength(1);
+        await expect(registry.resolve(current.handle, ORG_B)).resolves.toMatchObject({ steelSessionId: 's2' });
+        expect(await registry.reap({ idleMs: 120_000 })).toBe(0);
+    });
+
+    it('keeps a reused name when stale cleanup resumes after allocation', async () => {
+        const { registry, store, clock } = harness({ generateHandle: () => 'nimble-purple-otter' });
+        const original = await registry.create({
+            principal: ORG_A,
+            steelSessionId: 's1',
+            expiresAt: clock.ms + 60_000,
+        });
+        await store.del(`steel-mcp:handle:${original.handle}`);
+        let cleanupReady!: () => void;
+        let resumeCleanup!: () => void;
+        const ready = new Promise<void>(resolve => {
+            cleanupReady = resolve;
+        });
+        const gate = new Promise<void>(resolve => {
+            resumeCleanup = resolve;
+        });
+        const forget = store.forgetHandle.bind(store);
+        vi.spyOn(store, 'forgetHandle').mockImplementationOnce(async (...args) => {
+            cleanupReady();
+            await gate;
+            return forget(...args);
+        });
+        const pending = registry.list(ORG_A);
+        await ready;
+        const current = await registry.create({ principal: ORG_A, steelSessionId: 's2', expiresAt: clock.ms + 60_000 });
+        await registry.recordHandoff(current.handle);
+        resumeCleanup();
+        await pending;
+        expect(await registry.list(ORG_A)).toHaveLength(1);
+        await expect(registry.resolve(current.handle, ORG_A)).resolves.toMatchObject({
+            steelSessionId: 's2',
+            handoffRounds: 1,
+        });
+    });
+
+    it('does not release or fence a reused name from a stale release read', async () => {
+        const { registry, store, clock, released } = harness({ generateHandle: () => 'nimble-purple-otter' });
+        const original = await registry.create({
+            principal: ORG_A,
+            steelSessionId: 's1',
+            expiresAt: clock.ms + 60_000,
+        });
+        let claimReady!: () => void;
+        let resumeClaim!: () => void;
+        const ready = new Promise<void>(resolve => {
+            claimReady = resolve;
+        });
+        const gate = new Promise<void>(resolve => {
+            resumeClaim = resolve;
+        });
+        const claim = store.setIfAbsent.bind(store);
+        vi.spyOn(store, 'setIfAbsent').mockImplementationOnce(async (...args) => {
+            claimReady();
+            await gate;
+            return claim(...args);
+        });
+        const pending = registry.release(original.handle, ORG_A, 'explicit');
+        await ready;
+        await registry.release(original.handle, ORG_A, 'explicit');
+        const current = await registry.create({ principal: ORG_A, steelSessionId: 's2', expiresAt: clock.ms + 60_000 });
+        resumeClaim();
+        await pending;
+        expect(released).toEqual(['s1']);
+        await expect(registry.resolveForAgent(current.handle, ORG_A)).resolves.toMatchObject({ steelSessionId: 's2' });
+    });
+
     /** Two registries over one store: exactly the hosted shape, where no request is routed stickily. */
     function twoReplicas(options: HarnessOptions = {}) {
         const clock = options.clock ?? testClock();

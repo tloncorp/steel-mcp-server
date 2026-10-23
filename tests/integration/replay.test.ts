@@ -108,7 +108,7 @@ describe('browser_session_replay descriptor', () => {
         const harness = await connect(api);
         const result = await harness.client.callTool({
             name: 'browser_session_replay',
-            arguments: { session_id: 'sess_old_handle' },
+            arguments: { session_id: 'released-blue-fox' },
         });
 
         expect(isError(result)).toBe(true);

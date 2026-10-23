@@ -52,16 +52,14 @@ describe('profile writer reservations', () => {
 });
 
 describe('InMemoryHandleRegistry.create', () => {
-    it('mints an opaque prefixed handle with at least 128 bits of entropy', async () => {
+    it('mints a readable adjective-color-animal handle', async () => {
         const { registry } = newRegistry();
         const record = await registry.create({
             principal: ORG_A,
             steelSessionId: 'steel-1',
             expiresAt: Date.now() + 60_000,
         });
-        expect(record.handle.startsWith('sess_')).toBe(true);
-        // base64url of 16 bytes is 22 characters.
-        expect(record.handle.length - 'sess_'.length).toBeGreaterThanOrEqual(22);
+        expect(record.handle).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
     });
 
     it('never derives the handle from the principal, the Steel id or the clock', async () => {
@@ -105,7 +103,7 @@ describe('InMemoryHandleRegistry.resolve', () => {
 
     it('does not reveal whether a rejected handle exists', async () => {
         const wrongOrg = await registry.resolve(handle, ORG_B).catch(e => (e as Error).message);
-        const unknown = await registry.resolve('sess_nope', ORG_B).catch(e => (e as Error).message);
+        const unknown = await registry.resolve('missing-blue-fox', ORG_B).catch(e => (e as Error).message);
         expect(wrongOrg).toBe(unknown);
     });
 

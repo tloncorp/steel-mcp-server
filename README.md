@@ -98,7 +98,7 @@ Deployment, Redis, tracing, and the client snippets are in [docs/HOSTING.md](doc
 
 ## Tools
 
-The default `browse` profile exposes seventeen tools. `STEEL_PROFILE=scrape` exposes only the first
+The default `browse` profile exposes eighteen tools. `STEEL_PROFILE=scrape` exposes only the first
 three, which never start a browser.
 
 <details>
@@ -111,6 +111,7 @@ three, which never start a browser.
 | `browser_pdf` | Render a page to PDF and return a link; supports proxies |
 | `browser_session_create` | Start a browser session you can interact with |
 | `browser_session_release` | Shut it down and stop the meter |
+| `browser_login` | Fill a saved login for this bot on the exact HTTPS origin without returning credentials |
 | `browser_navigate` | Point a session at a URL |
 | `browser_snapshot` | Read the page as an accessibility tree with `@eN` references |
 | `browser_find` | Locate elements by text, safe regex, or role without reading the whole page |
@@ -136,13 +137,19 @@ The inference key belongs in the operator's secret configuration, not the moon's
 MCP upstream headers. The moon's `X-Api-Key` continues to identify its browser tenant.
 Without an OpenRouter key, the ordinary browser tools remain available.
 
+Session IDs use randomly chosen `adjective-color-animal` names, such as
+`nimble-purple-otter`. The registry checks every candidate against reserved names
+and retries collisions. Successful release or expiry cleanup frees the name for
+reuse; pending or failed cleanup keeps it reserved. Every request still verifies
+the caller's credential: a session name grants no access by itself.
+
 Create a session, navigate to the starting page, then call:
 
 ```json
 {
   "name": "browser_run",
   "arguments": {
-    "session_id": "sess_...",
+    "session_id": "nimble-purple-otter",
     "task": "Search for espresso and open the matching article",
     "inputs": [{ "field": "Search", "value": "espresso" }],
     "max_steps": 12,
@@ -266,3 +273,43 @@ against Steel's API and Chrome, and [RESEARCH.md](RESEARCH.md) the decisions beh
 Contributions are welcome: fork, branch, and open a pull request that says what it changes and why.
 For bugs, [open an issue](https://github.com/steel-dev/steel-mcp-server/issues) with the tool you
 called and the error text.
+
+### Planet-backed login vault
+
+Self-hosted operators enable private saved-login filling with `BROWSER_VAULT_ENABLED=true`.
+Configuration requires `BROWSER_VAULT_KEY` (base64, 32 random bytes), `BROWSER_VAULT_KEY_ID`,
+`BROWSER_VAULT_SERVICE_TOKEN` (at least 32 characters), `PIONEER_SIDECAR_TOKEN`, and `BROWSER_VAULT_PIONEER_ORIGIN`
+(an HTTPS origin template containing `{planet}`). The encryption key is durable deployment
+state: back it up and keep it consistent across browser clusters in the same environment.
+Changing the encryption key requires an explicit re-encryption migration; moon-code and owner-token rotation do not.
+Steel authenticates to Pioneer with its existing sidecar token using `Authorization: Basic`.
+The viewer service token protects only the private viewer-to-MCP API.
+
+The caller supplies `X-Tlon-Parent-Ship` and `X-Tlon-Ship` as routing hints. Pioneer verifies the
+moon's derived browser key before the session can use saved credentials. The parent planet stores
+ciphertext, exact HTTPS origin, account label, optional username, bot-moon scope, and an `ask` or `allow` policy. The
+model can list that metadata; only an `allow` record can be filled automatically. An `ask` record
+requires an owner-authenticated secure form. A chat reply or A2UI continuation is not authorization.
+The owner can fill once, grant automatic use, revoke it, or delete the credential in Bot settings.
+
+AES-256-GCM keys use HKDF-SHA256 over the static server key and a domain-separated SHA-256
+derivative of the planet's code. Each record retains its encryption factor so code changes do not
+invalidate saved passwords. The factor alone cannot decrypt anything. Owner proofs use a separate
+HMAC domain, expire after ten minutes, and are verified against the current planet code and server time. Both values travel only through
+private service requests; neither is returned by MCP or the Solaris metadata API.
+
+The model-facing `browser_login` tool requires `fields` from a current snapshot when using a saved login. It fills only those controls through the private browser API and returns an outcome without clicking or submitting. The agent inspects the page and chooses the next action. Owner secure-entry cards use the same selection and fill-only contract.
+It makes at most one automatic attempt per account revision and form step; filling is not proof of
+sign-in. Known filled values are redacted from tool results and automation-model input. Raw CDP,
+screenshots, and PDFs are unavailable through MCP when the vault is enabled. The live viewer
+requires a separate owner proof. A restarted MCP process rejects unrecovered browser handles;
+open a fresh session to restore the credential protection context.
+
+The destination site necessarily receives the password. Redaction covers direct values and common
+encodings, not arbitrary transformations by a hostile site; exact-origin checks and the private
+browser control plane remain essential. Keep the browser isolated from internal control services.
+
+The viewer connects to the service-token-protected `/internal/vault/` endpoints. Keep this
+surface and the browser REST API private. Both services are disabled by default, and configuration
+errors fail startup when enabled. See the sibling Steel Browser Kubernetes deployment guide for
+the matching viewer/Pioneer environment, rollout checks, and secret references.

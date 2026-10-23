@@ -30,7 +30,7 @@ function context(options: { capabilities?: Record<string, unknown>; method?: str
 }
 
 const STATE: HandoffState = {
-    handle: 'sess_abc',
+    handle: 'calm-blue-fox',
     tool: 'browser_navigate',
     block: 'login_wall',
     origin: 'https://app.test',
@@ -50,7 +50,7 @@ describe('createHandoffCodec', () => {
         const sealed = await codec.mint(STATE, ctx);
         const [version, body, mac] = sealed.split('.');
         const edited = JSON.parse(Buffer.from(body ?? '', 'base64url').toString('utf8'));
-        edited.p.handle = 'sess_someoneelse';
+        edited.p.handle = 'other-red-fox';
         const forged = [version, Buffer.from(JSON.stringify(edited)).toString('base64url'), mac].join('.');
 
         await expect(codec.verify(forged, ctx)).rejects.toThrow(/mac/);

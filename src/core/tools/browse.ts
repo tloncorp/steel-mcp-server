@@ -84,7 +84,7 @@ export function registerNavigate(host: ToolHost, deps: ServerDeps): void {
             inputSchema: z
                 .object({
                     session_id: sessionIdSchema,
-                    url: z.url().describe('Where to go.'),
+                    url: z.url().describe('HTTP or HTTPS URL to open.'),
                     include_snapshot: z
                         .boolean()
                         .optional()

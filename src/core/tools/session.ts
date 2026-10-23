@@ -1,5 +1,6 @@
 // ABOUTME: Session lifecycle tools: explicit create with both Steel timeouts set, a release that
 // ABOUTME: captures context first, live-or-finished diagnostics, and the app-only live-view endpoint.
+
 import type { ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { SESSION_VIEWER_URI } from '../apps/session-viewer.js';
@@ -18,8 +19,10 @@ import {
     sessionLogErrorText,
     sessionLogUrl,
 } from '../steel/diagnostics.js';
+import { formFieldSelectorsSchema } from '../steel/selected-form.js';
 import type { AccountDetails, AgentTraceTimeline, SessionLogTimeline, SteelSession } from '../steel/types.js';
 import { fenceUntrusted } from '../untrusted.js';
+import { VaultError } from '../vault/types.js';
 import {
     cursorSchema,
     fencedPageState,
@@ -304,7 +307,7 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                         throw error;
                     }
 
-                    let record: HandleRecord;
+                    let record: HandleRecord | undefined;
                     try {
                         record = await deps.registry.create({
                             principal: deps.principal,
@@ -324,7 +327,28 @@ export function registerSessionCreate(host: ToolHost, deps: ServerDeps): void {
                                 persistProfile: persistProfile || undefined,
                             },
                         });
+                        if (deps.vault) {
+                            try {
+                                if (!(await deps.vault.bindSession(record, ctx.mcpReq.signal)))
+                                    throw new VaultError(403, 'Browser vault identity verification failed.');
+                            } catch (error) {
+                                if (error instanceof VaultError) throw error;
+                                throw new VaultError(
+                                    503,
+                                    'Browser vault setup failed. The credential service is unavailable.'
+                                );
+                            }
+                        }
                     } catch (error) {
+                        if (record) {
+                            await deps.registry
+                                .release(record.handle, deps.principal, 'explicit')
+                                .then(() => {
+                                    slotMayBeLive = false;
+                                })
+                                .catch(() => undefined);
+                            throw error;
+                        }
                         await deps.pool.close(steelSessionId).catch(() => undefined);
                         await deps.api
                             .releaseSession(steelSessionId)
@@ -560,29 +584,14 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
         'browser_session_live_view',
         {
             title: 'Live view connection',
-            description: 'App-only viewer and control lease; no page content.',
+            description: 'App-only viewer, lease, and private form preparation.',
             annotations: { destructiveHint: true, openWorldHint: true },
             inputSchema: z
                 .object({
-                    session_id: sessionIdSchema
-                        .optional()
-                        .describe(
-                            'Omit to stream the newest live session this credential owns, which is what a ' +
-                                'viewer that never received the session does.'
-                        ),
+                    session_id: sessionIdSchema.optional().describe('Omit for this credential’s newest session.'),
                     action: z.enum(['connect', 'prepare_form', 'acquire', 'renew', 'release']).optional(),
                     control_token: z.string().optional(),
-                    fields: z
-                        .array(
-                            z.union([
-                                z.string().regex(/^@e\d+$/),
-                                z.object({ name: z.string().min(1).max(512) }).strict(),
-                                z.object({ label: z.string().min(1).max(1024) }).strict(),
-                            ])
-                        )
-                        .min(1)
-                        .max(40)
-                        .optional(),
+                    fields: formFieldSelectorsSchema.optional(),
                 })
                 .strict(),
             _meta: { ui: { visibility: ['app'] } },
@@ -590,21 +599,30 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
         async (args, ctx) =>
             guard(deps, 'browser_session_live_view', ctx.mcpReq, async () => {
                 const action = args.action ?? 'connect';
+                if (deps.vault && action !== 'prepare_form' && action !== 'connect')
+                    throw new SteelToolError('This browser contains protected credentials. Use the owner viewer.', {
+                        code: 'invalid_argument',
+                    });
                 if (action === 'prepare_form') {
-                    if (!args.session_id || !args.fields || args.control_token)
-                        throw new SteelToolError('Selected form preparation requires session_id and fields.', {
-                            code: 'invalid_argument',
-                        });
+                    if (!args.session_id || args.control_token || !args.fields)
+                        throw new SteelToolError(
+                            'Form preparation requires session_id and fields from a current snapshot, with no control_token.',
+                            {
+                                code: 'invalid_argument',
+                            }
+                        );
                     const record = await deps.registry.resolveForAgent(args.session_id, deps.principal);
-                    const page = await deps.pool.page(record.steelSessionId, ctx.mcpReq.signal);
-                    const selection = await page.selectFormFields(args.fields);
+                    await deps.vault?.assertSession(record);
+                    const selection = await (
+                        await deps.pool.page(record.steelSessionId, ctx.mcpReq.signal)
+                    ).selectFormFields(args.fields);
                     const handoff = await deps.api.prepareFormHandoff(
                         record.steelSessionId,
                         selection,
                         ctx.mcpReq.signal
                     );
                     return successResult(
-                        { result: 'Selected form prepared for private entry.' },
+                        { result: 'Form prepared for private entry.' },
                         { session_id: record.handle, ...handoff }
                     );
                 }
@@ -671,6 +689,7 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                 const record = args.session_id
                     ? await deps.registry.resolve(args.session_id, deps.principal)
                     : await newestLiveSession(deps);
+                await deps.vault?.assertSession(record);
                 let session: SteelSession;
                 try {
                     // Read fresh every time: Steel re-mints the token on each read, and an expiring
@@ -691,6 +710,23 @@ export function registerSessionLiveView(host: ToolHost, deps: ServerDeps): void 
                     throw new SteelToolError('This browser session is not live. Start a new session.', {
                         code: 'invalid_argument',
                     });
+                }
+
+                if (deps.vault || (!session.websocketUrl && session.sessionViewerUrl)) {
+                    if (!session.sessionViewerUrl)
+                        throw new SteelToolError('Steel returned no owner viewer for this session.', {
+                            code: 'steel_error',
+                        });
+                    // The owner authenticates at the viewer gateway. Direct CDP can
+                    // expose protected values and is not part of this handoff.
+                    return successResult(
+                        { result: 'Owner viewer connection details for this session.' },
+                        {
+                            session_id: record.handle,
+                            viewer_url: session.sessionViewerUrl,
+                            expires_at: new Date(record.expiresAt).toISOString(),
+                        }
+                    );
                 }
 
                 const cdpUrl = session.websocketUrl;

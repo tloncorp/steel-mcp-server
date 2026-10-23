@@ -386,7 +386,7 @@ describe('hosted HTTP session isolation', () => {
             result: { structuredContent?: { session_id?: string } };
         };
         const sessionId = created.result.structuredContent?.session_id;
-        expect(sessionId).toMatch(/^sess_/);
+        expect(sessionId).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
 
         const ownerResponse = await handler.fetch(
             toolRequest('ste-owner', 'browser_session_diagnostics', { session_id: sessionId })
@@ -526,7 +526,7 @@ describe('hosted HTTP session isolation', () => {
         const createdResponse = await first.handler.fetch(toolRequest('ste-a', 'browser_session_create', {}));
         const created = (await createdResponse.json()) as { result: { structuredContent?: { session_id?: string } } };
         const sessionId = created.result.structuredContent?.session_id;
-        expect(sessionId).toMatch(/^sess_/);
+        expect(sessionId).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/);
         expect(first.api.created).toHaveLength(1);
 
         const elsewhere = await second.handler.fetch(
